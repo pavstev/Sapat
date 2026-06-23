@@ -18,6 +18,7 @@ final class RecorderViewModel {
     // MARK: Observed state (read by the view)
     private(set) var state: AppState = .preparing(progress: nil)
     private(set) var level: Double = 0 // mic level 0...1, drives the record-button pulse
+    private(set) var levelHistory: [Double] = [] // recent levels for the menu-bar waveform
     private(set) var serbianText = ""
     private(set) var englishText = ""
     private(set) var translationSource: TranslationSource?
@@ -30,6 +31,9 @@ final class RecorderViewModel {
 
     /// Set by AppDelegate so the popover's close (✕) button can dismiss it.
     var onRequestClose: (() -> Void)?
+
+    /// Fires on each metering tick with the recent level buffer (drives the menu-bar waveform).
+    var onLevelChange: (([Double]) -> Void)?
 
     var isRecording: Bool {
         if case .recording = state { return true }
@@ -174,6 +178,7 @@ final class RecorderViewModel {
         recorder?.stop()
         recorder = nil
         level = 0
+        levelHistory = []
 
         guard let url = recordingURL, duration > 0.3 else {
             flashNotice("No speech detected — try again")
@@ -306,6 +311,9 @@ final class RecorderViewModel {
         recorder.updateMeters()
         let power = recorder.averagePower(forChannel: 0) // dBFS, roughly -160...0
         level = Double(max(0, min(1, (power + 55) / 55)))
+        levelHistory.append(level)
+        if levelHistory.count > 18 { levelHistory.removeFirst(levelHistory.count - 18) }
+        onLevelChange?(levelHistory)
     }
 
     private func stopMetering() {
