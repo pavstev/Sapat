@@ -14,6 +14,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let popover = NSPopover()
     private var hotKey: GlobalHotKey?
 
+    /// JSON-backed translation history, shared with the popover's HistoryView.
+    private let historyStore = HistoryStore()
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         configurePopover()
         configureStatusItem()
@@ -40,9 +43,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // record clicks, and transcription. It closes only on the menu bar icon or
         // the ✕ button. (`.transient` would dismiss it on any focus change.)
         popover.behavior = .applicationDefined
+        viewModel.history = historyStore
         let rootView = PopoverView()
             .environment(viewModel)
             .environment(updateChecker)
+            .environment(historyStore)
         let hosting = NSHostingController(rootView: rootView)
         hosting.sizingOptions = [.preferredContentSize] // let the SwiftUI content size the popover
         popover.contentViewController = hosting

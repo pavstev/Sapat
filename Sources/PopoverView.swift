@@ -10,11 +10,26 @@ struct PopoverView: View {
     private let popoverWidth: CGFloat = 440
     private let resultMaxHeight: CGFloat = 240
 
+    @State private var tab: Tab = .record
+    private enum Tab: Hashable { case record, history }
+
     var body: some View {
         VStack(spacing: 0) {
             header
             Divider()
-            content
+            Picker("View", selection: $tab) {
+                Text("Record").tag(Tab.record)
+                Text("History").tag(Tab.history)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .padding(.horizontal, 12)
+            .padding(.top, 10)
+            if tab == .record {
+                content
+            } else {
+                HistoryView()
+            }
             Divider()
             footer
         }

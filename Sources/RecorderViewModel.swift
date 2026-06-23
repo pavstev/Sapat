@@ -59,6 +59,9 @@ final class RecorderViewModel {
     private let whisper = WhisperEngine()
     private let ollama = OllamaClient()
 
+    /// Translation history store; set by AppDelegate.
+    var history: HistoryStore?
+
     // MARK: Recording internals
     private var recorder: AVAudioRecorder?
     private var recordingURL: URL?
@@ -234,6 +237,16 @@ final class RecorderViewModel {
         copyToPasteboard(cleaned)
         flashCopied()
         setState(.done)
+        saveToHistory(serbian: serbianText, english: cleaned, source: source)
+    }
+
+    private func saveToHistory(serbian: String, english: String, source: TranslationSource) {
+        history?.add(
+            serbian: serbian,
+            english: english,
+            model: whisperModel,
+            source: source == .ollama ? "Ollama" : "Whisper"
+        )
     }
 
     // MARK: Helpers
