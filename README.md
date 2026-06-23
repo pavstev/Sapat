@@ -1,35 +1,53 @@
-# Glasnik
+<p align="center">
+  <img src="docs/icon.png" width="128" alt="Glasnik icon — ГG monogram">
+</p>
 
-[![CI](https://github.com/pavstev/Glasnik/actions/workflows/ci.yml/badge.svg)](https://github.com/pavstev/Glasnik/actions/workflows/ci.yml)
-[![Latest release](https://img.shields.io/github/v/release/pavstev/Glasnik?sort=semver)](https://github.com/pavstev/Glasnik/releases/latest)
-[![Platform](https://img.shields.io/badge/macOS-14%2B-blue)](https://github.com/pavstev/Glasnik/releases/latest)
+<h1 align="center">Glasnik</h1>
 
-A native macOS menu bar app that turns Serbian speech into polished English.
+<p align="center">A native macOS menu bar app that turns Serbian speech into polished English — on‑device.</p>
 
-Press a global shortcut (or click the menu bar mic), speak Serbian, and Glasnik
-transcribes it on‑device with [WhisperKit](https://github.com/argmaxinc/argmax-oss-swift),
-translates it to English, shows both, and copies the English to your clipboard.
+<p align="center">
+  <a href="https://github.com/pavstev/Glasnik/actions/workflows/ci.yml"><img src="https://github.com/pavstev/Glasnik/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/pavstev/Glasnik/releases/latest"><img src="https://img.shields.io/github/v/release/pavstev/Glasnik?sort=semver" alt="Latest release"></a>
+  <img src="https://img.shields.io/badge/macOS-14%2B-blue" alt="macOS 14+">
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/pavstev/Glasnik" alt="MIT"></a>
+</p>
 
-It's **offline‑first**: everything runs on your Mac. A local
-[Ollama](https://ollama.com) model is used *if available* to polish the translation,
-but the app works fully without it.
+---
 
-> *Glasnik* (гласник) — Serbian for "messenger".
+Press a shortcut (or click the menu bar **Г**), speak Serbian, and Glasnik transcribes
+it on‑device with [WhisperKit](https://github.com/argmaxinc/argmax-oss-swift), translates
+it to English, shows both, and copies the English to your clipboard.
+
+It's **offline‑first**: everything runs on your Mac. A local [Ollama](https://ollama.com)
+model polishes the translation *if available*, but the app works fully without it.
+
+> *Glasnik* (гласник) — Serbian for "messenger". The icon is **ГG** — the letter *G* in both alphabets.
+
+## Features
+
+- 🎙️ **On‑device transcription** — WhisperKit `large-v3` with VAD chunking for accurate, long‑form Serbian.
+- ✨ **Polished translation** — local Ollama `qwen2.5:3b` when running; Whisper's own translate task as an offline fallback.
+- 🌊 **Live waveform** — the menu bar **Г** animates with your voice while recording.
+- 🗂️ **Searchable history** — every translation saved locally, searchable, re‑copyable (Record / History toggle).
+- 🎚️ **Tone & glossary** — pick a tone (polished / formal / casual / literal) and add a custom glossary.
+- ⌨️ **Global hotkey** — `⌥⇧Space` from any app; the popover stays open across app and Space switches.
+- ⬇️ **In‑app updates** — checks GitHub Releases and offers the latest.
 
 ## Install
 
 1. Download the latest **`Glasnik-x.y.z.zip`** from the
    [Releases page](https://github.com/pavstev/Glasnik/releases/latest) and unzip it.
 2. Move `Glasnik.app` to `/Applications`.
-3. The app is **ad‑hoc signed** (no paid Apple Developer account), so on first launch
-   Gatekeeper will balk. Either:
-   - **Right‑click the app → Open → Open**, or
-   - run once: `xattr -dr com.apple.quarantine /Applications/Glasnik.app`
-4. Look for the **mic icon in the menu bar** (the app has no Dock icon).
+3. It's **ad‑hoc signed** (no paid Apple Developer account), so on first launch Gatekeeper
+   will balk. Either **right‑click → Open → Open**, or run once:
+   `xattr -dr com.apple.quarantine /Applications/Glasnik.app`
+4. Look for the **Г** in the menu bar (no Dock icon).
 
-On first launch Glasnik downloads the `openai_whisper-large-v3-v20240930` (large-v3 turbo) model (~1.5 GB) from
-Hugging Face — the popover shows **"Preparing model…"** until it's ready, and macOS
-prompts once for microphone access.
+On first launch Glasnik downloads the `openai_whisper-large-v3` model (~2.9 GB) from
+Hugging Face — the popover shows **"Preparing model…"** until it's ready (the model is
+prewarmed at launch so the first transcription is fast), and macOS prompts once for the
+microphone.
 
 ### Optional: polished translations with Ollama
 
@@ -39,36 +57,31 @@ ollama pull qwen2.5:3b
 ollama serve               # leave running
 ```
 
-When Ollama is running, `qwen2.5:3b` produces cleaner English. Without it, Glasnik
-falls back to Whisper's own translation (rougher) and tells you how to enable Ollama.
+When Ollama is running, `qwen2.5:3b` produces cleaner English and honors your tone +
+glossary. Without it, Glasnik falls back to Whisper's own translation.
 
 ## How it works
 
 ```
 record (16 kHz mono WAV)
-   └─ WhisperKit  ──▶  Serbian transcript        (task: transcribe, language: sr)
+   └─ WhisperKit (large-v3, VAD chunking)  ──▶  Serbian transcript   (task: transcribe, language: sr)
         └─ translate:
-             ├─ Ollama qwen2.5:3b  ──▶  polished English   (preferred, if running)
+             ├─ Ollama qwen2.5:3b  ──▶  polished English   (preferred, honors tone + glossary)
              └─ WhisperKit          ──▶  English baseline   (offline fallback, task: translate)
-   └─ show Serbian + English, auto‑copy English to the clipboard
+   └─ show Serbian + English, auto‑copy English, save to history
 ```
 
-- Single, app‑level state machine: `preparing → idle → recording → transcribing → translating → done` (plus `error`).
-- The model is prewarmed at launch and the microphone is requested up front.
+- Single app‑level state machine: `preparing → idle → recording → transcribing → translating → done` (+ `error`).
 - A no‑speech guard prevents Whisper from "hallucinating" text out of silence.
-- The global hotkey uses Carbon's `RegisterEventHotKey` directly — no third‑party
-  dependency, no extra permission.
-- An in‑app **update check** queries GitHub Releases and shows a banner when a newer
-  version is available.
+- The global hotkey uses Carbon's `RegisterEventHotKey` directly — no third‑party dependency.
 
 ## Usage
 
-- **Click** the menu bar mic to open the popover, then click the big button to start/stop.
-- **Global shortcut ⌥⌘G** starts/stops recording from any app and opens the popover
-  for feedback (fixed for v1; rebinding is a planned enhancement).
-- The mic icon turns **red** while recording. On completion the English is shown and
-  **auto‑copied** to the clipboard (you'll see a "Copied ✓" confirmation).
-- Use the **↻** button in the popover footer to check for updates manually.
+- **Click** the menu bar **Г** to open the popover; the **Record / History** toggle switches views.
+- **`⌥⇧Space`** from any app starts/stops recording and opens the popover.
+- The menu bar glyph turns into a **red live waveform** while recording.
+- On completion the English shows, **auto‑copies**, and is saved to history. **Copy English** re‑copies; the **↻** footer button checks for updates.
+- Set the **tone** and **glossary** in Settings (⌘,).
 
 ## Build from source
 
@@ -82,72 +95,59 @@ cd Glasnik
 open Glasnik.app
 ```
 
-`bundle.sh` env overrides: `GLASNIK_VERSION=1.2.3` stamps a version into the bundle;
-`GLASNIK_UNIVERSAL=1` builds a universal (arm64 + x86_64) binary.
-
-### Building with Xcode instead (optional)
-
-```sh
-brew install xcodegen
-xcodegen generate
-open Glasnik.xcodeproj
-```
+`bundle.sh` env overrides: `GLASNIK_VERSION=1.2.3` stamps a version; `GLASNIK_UNIVERSAL=1`
+builds a universal (arm64 + x86_64) binary. The icon is generated by
+`swift scripts/make-icon.swift` + `iconutil`. Tests run with `swift test` (the CLT bundles
+no test framework, so they run in CI on the Xcode‑based runner).
 
 ## Releasing (maintainer)
 
 Releases are **fully automated** by GitHub Actions
-([`.github/workflows/release.yml`](.github/workflows/release.yml)):
+([`release.yml`](.github/workflows/release.yml)):
 
 ```sh
-# bump the version, then:
-git tag v1.2.0
-git push origin v1.2.0
+git tag v1.2.0 && git push origin v1.2.0
 ```
 
 The workflow builds on a macOS runner, runs `bundle.sh` (stamping the tag version),
 zips the app with `ditto`, and publishes a GitHub Release with auto‑generated notes.
-Every push/PR to `main` is also build‑checked by
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml).
-
-## Translation quality
-
-Transcription accuracy scales with model size. Glasnik defaults to
-`openai_whisper-large-v3-v20240930` (large-v3 turbo) — a strong balance of accuracy
-and speed for Serbian. For maximum accuracy, set `whisperModel` in
-`Sources/RecorderViewModel.swift` to `openai_whisper-large-v3`; for a smaller, faster
-download, use `openai_whisper-medium` or `openai_whisper-small`.
+Every push/PR to `main` is build‑checked + tested by [`ci.yml`](.github/workflows/ci.yml).
 
 ## Project layout
 
 | File | Responsibility |
 | --- | --- |
-| `Package.swift` | SwiftPM build (CLT, no Xcode) — primary build path |
+| `Package.swift` | SwiftPM build (CLT, no Xcode) + test target |
 | `bundle.sh` | Builds + assembles & ad‑hoc signs `Glasnik.app` |
-| `project.yml` | Optional XcodeGen spec (only if you use full Xcode) |
-| `.github/workflows/ci.yml` | Build check on push/PR |
-| `.github/workflows/release.yml` | Tag‑triggered build + GitHub Release |
-| `Info.plist` | `LSUIElement`, `NSMicrophoneUsageDescription`, bundle metadata |
+| `scripts/make-icon.swift` | Generates the ГG `Glasnik.icns` |
+| `project.yml` | Optional XcodeGen spec |
+| `.github/workflows/` | CI (build + test) and tag‑triggered release |
 | `Sources/GlasnikApp.swift` | `@main`; app delegate adaptor + Settings scene |
-| `Sources/AppDelegate.swift` | Status item, popover, global hotkey, status‑icon updates |
-| `Sources/RecorderViewModel.swift` | `@Observable @MainActor` — all recording/translation logic |
+| `Sources/AppDelegate.swift` | Status item, popover, hotkey, menu‑bar glyph + waveform |
+| `Sources/RecorderViewModel.swift` | `@Observable @MainActor` — recording/translation logic |
+| `Sources/WhisperEngine.swift` | WhisperKit wrapper (transcribe + translate, VAD, prewarm) |
+| `Sources/OllamaClient.swift` | Ollama `/api/generate` client + tone/glossary prompt |
+| `Sources/HistoryStore.swift` | JSON‑backed translation history |
+| `Sources/HistoryView.swift` | Searchable history UI |
+| `Sources/TranslationPreferences.swift` | Tone + glossary (UserDefaults) |
+| `Sources/PopoverView.swift` | SwiftUI popover (record, result, history) |
 | `Sources/UpdateChecker.swift` | GitHub Releases update check |
-| `Sources/WhisperEngine.swift` | WhisperKit wrapper (transcribe + translate passes) |
-| `Sources/OllamaClient.swift` | Local Ollama `/api/generate` client + typed errors |
-| `Sources/PopoverView.swift` | SwiftUI popover (record button, transcript, status, hints, update banner) |
-| `Sources/SettingsView.swift` | Preferences window |
-| `Sources/AppState.swift` | State machine + error/hint/action models |
-| `Sources/GlobalHotKey.swift` | Carbon `RegisterEventHotKey` wrapper + ⌥⌘G default |
+| `Sources/GlobalHotKey.swift` | Carbon `RegisterEventHotKey` wrapper (⌥⇧Space) |
+| `Sources/Log.swift` | os.Logger categories |
 
 ## Notes & limitations
 
-- First run blocks on the model download; subsequent launches load from cache.
+- First run downloads `large-v3` (~2.9 GB); cached thereafter.
 - Releases are ad‑hoc signed (not notarized) — see the Gatekeeper step in **Install**.
 - The offline Whisper translation (no Ollama) is rougher than Ollama's polish.
-- Released binaries are arm64 (Apple Silicon); set `GLASNIK_UNIVERSAL=1` to build universal.
-- The global shortcut is fixed at ⌥⌘G for v1.
+- Released binaries are arm64; set `GLASNIK_UNIVERSAL=1` to build universal.
 - Bundle id: `com.stevanpavlovic.Glasnik`.
 
 ## Dependencies
 
 - [argmax-oss-swift / WhisperKit](https://github.com/argmaxinc/argmax-oss-swift) — on‑device speech (pinned to 1.0.0)
 - [Ollama](https://ollama.com) + `qwen2.5:3b` — optional translation polish
+
+## License
+
+[MIT](LICENSE) © Stevan Pavlović
