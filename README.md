@@ -1,5 +1,9 @@
 # Glasnik
 
+[![CI](https://github.com/pavstev/Glasnik/actions/workflows/ci.yml/badge.svg)](https://github.com/pavstev/Glasnik/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/pavstev/Glasnik?sort=semver)](https://github.com/pavstev/Glasnik/releases/latest)
+[![Platform](https://img.shields.io/badge/macOS-14%2B-blue)](https://github.com/pavstev/Glasnik/releases/latest)
+
 A native macOS menu bar app that turns Serbian speech into polished English.
 
 Press a global shortcut (or click the menu bar mic), speak Serbian, and Glasnik
