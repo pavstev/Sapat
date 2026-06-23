@@ -56,7 +56,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func configureStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         guard let button = statusItem.button else { return }
-        button.image = micImage(filled: false)
+        button.image = glyphImage()
         button.action = #selector(togglePopover)
         button.target = self
     }
@@ -107,20 +107,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func updateStatusIcon(for state: AppState) {
         guard let button = statusItem.button else { return }
         if case .recording = state {
-            button.image = micImage(filled: true)
+            button.image = glyphImage()
             button.contentTintColor = .systemRed
         } else {
-            button.image = micImage(filled: false)
+            button.image = glyphImage()
             button.contentTintColor = nil
         }
     }
 
-    private func micImage(filled: Bool) -> NSImage? {
-        let image = NSImage(
-            systemSymbolName: filled ? "mic.fill" : "mic",
-            accessibilityDescription: "Glasnik"
-        )
-        image?.isTemplate = true
+    /// The bold Cyrillic Г, drawn as a monochrome template so the menu bar tints it
+    /// (default for idle, red while recording — until the waveform takes over).
+    private func glyphImage() -> NSImage {
+        let size = NSSize(width: 16, height: 16)
+        let image = NSImage(size: size)
+        image.lockFocus()
+        let font = NSFont.systemFont(ofSize: 14, weight: .bold)
+        let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.black]
+        let glyph = NSAttributedString(string: "Г", attributes: attributes)
+        let textSize = glyph.size()
+        glyph.draw(at: NSPoint(x: (size.width - textSize.width) / 2, y: (size.height - textSize.height) / 2))
+        image.unlockFocus()
+        image.isTemplate = true
         return image
     }
 
