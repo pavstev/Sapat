@@ -61,3 +61,31 @@ open Glasnik.app
 - Global hotkey is **⌥⇧Space** via Carbon `RegisterEventHotKey`.
 - Ad-hoc signed, non-sandboxed, local-only. Releases are tag-triggered: `git tag vX.Y.Z && git push origin vX.Y.Z`.
 - Always verify a change with `./bundle.sh` then launch — it's a menu-bar agent (no Dock icon).
+
+## Continuing on a new machine (or a fresh Claude)
+
+Everything needed lives in this repo — Git is the source of truth, there is no external
+state. To pick development back up on another Mac:
+
+1. **Prereqs:** macOS 14+, Command Line Tools (`xcode-select --install`), `git`, `gh`.
+2. **Identity:** `gh auth login` (GitHub account **pavstev**), then
+   `git config user.name pavstev && git config user.email pavstev@users.noreply.github.com`.
+3. `git clone https://github.com/pavstev/Glasnik.git && cd Glasnik`
+4. Build + run: `./bundle.sh && open Glasnik.app` (first launch re-downloads the ~2.9 GB model).
+5. Read the **Conventions & gotchas** above before editing. History is in the commit log;
+   in-flight work is in GitHub issues/PRs.
+
+Identity facts: bundle id `com.stevanpavlovic.Glasnik`; no Apple Developer account
+(ad-hoc signing); no full Xcode (build via SwiftPM/CLT).
+
+## Project status & roadmap
+
+- **Shipped in v1.1:** searchable history, menu-bar waveform, tone & glossary, ГG icon +
+  Cyrillic Г menu-bar glyph, Swift 6 language mode, os.Logger, version-comparison tests,
+  and this agent/installer setup.
+- **Deferred backlog** (good next tasks): a quit-mid-transcription guard
+  (`applicationShouldTerminate` while busy); a real download/transcribe progress bar wired
+  into `AppState.preparing(progress:)`; load the recorded audio once to avoid a second
+  WhisperKit encode on the Ollama-down fallback path.
+- **Cut a release:** `git tag vX.Y.Z && git push origin vX.Y.Z` → CI builds + publishes the
+  GitHub Release; the in-app updater and `scripts/install.sh` pick it up automatically.
