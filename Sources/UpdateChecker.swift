@@ -74,12 +74,12 @@ final class UpdateChecker {
 
     // MARK: - Version helpers
 
-    private static func normalize(_ version: String) -> String {
+    nonisolated private static func normalize(_ version: String) -> String {
         version.trimmingCharacters(in: CharacterSet(charactersIn: "vV "))
     }
 
     /// Numeric, dot-separated comparison so `1.10.0` > `1.9.0`.
-    static func isVersion(_ lhs: String, newerThan rhs: String) -> Bool {
+    nonisolated static func isVersion(_ lhs: String, newerThan rhs: String) -> Bool {
         let left = components(lhs), right = components(rhs)
         for index in 0..<max(left.count, right.count) {
             let a = index < left.count ? left[index] : 0
@@ -89,7 +89,7 @@ final class UpdateChecker {
         return false
     }
 
-    private static func components(_ version: String) -> [Int] {
+    nonisolated private static func components(_ version: String) -> [Int] {
         version.split(separator: ".").map { part in
             Int(part.prefix { $0.isNumber }) ?? 0
         }

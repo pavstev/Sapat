@@ -36,6 +36,9 @@ jobs:
           restore-keys: |
             spm-${{ runner.os }}-
 
+      - name: Test
+        run: swift test
+
       - name: Build and bundle
         run: ./bundle.sh
 

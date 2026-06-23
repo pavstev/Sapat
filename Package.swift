@@ -21,6 +21,11 @@ let package = Package(
                 .product(name: "WhisperKit", package: "argmax-oss-swift"),
             ],
             path: "Sources"
+        ),
+        .testTarget(
+            name: "GlasnikTests",
+            dependencies: ["Glasnik"],
+            path: "Tests/GlasnikTests"
         )
     ]
 )
