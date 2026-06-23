@@ -10,6 +10,7 @@
 DerivedData/
 .build/
 Glasnik.app/
+*.iconset/
 
 # Swift Package Manager
 .swiftpm/

@@ -1,4 +1,4 @@
-// swift-tools-version: 5.9
+// swift-tools-version: 6.0
 import PackageDescription
 
 // SwiftPM build path — lets Glasnik build with just the Command Line Tools (no full
@@ -21,6 +21,11 @@ let package = Package(
                 .product(name: "WhisperKit", package: "argmax-oss-swift"),
             ],
             path: "Sources"
+        ),
+        .testTarget(
+            name: "GlasnikTests",
+            dependencies: ["Glasnik"],
+            path: "Tests/GlasnikTests"
         )
     ]
 )

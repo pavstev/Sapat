@@ -31,5 +31,7 @@
     <string>Glasnik records your voice so it can transcribe Serbian speech and translate it to English on your Mac.</string>
     <key>LSApplicationCategoryType</key>
     <string>public.app-category.productivity</string>
+    <key>CFBundleIconFile</key>
+    <string>Glasnik</string>
 </dict>
 </plist>

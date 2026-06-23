@@ -10,12 +10,15 @@ import Observation
 @Observable
 final class RecorderViewModel {
     // MARK: Configuration
-    private let whisperModel = "openai_whisper-small"
+    // large-v3: the most accurate multilingual model — best for Serbian. Slower per
+    // clip than turbo, but the bake-off showed ~3x fewer word errors.
+    private let whisperModel = "openai_whisper-large-v3"
     private let sourceLanguage = "sr" // Serbian
 
     // MARK: Observed state (read by the view)
     private(set) var state: AppState = .preparing(progress: nil)
     private(set) var level: Double = 0 // mic level 0...1, drives the record-button pulse
+    private(set) var levelHistory: [Double] = [] // recent levels for the menu-bar waveform
     private(set) var serbianText = ""
     private(set) var englishText = ""
     private(set) var translationSource: TranslationSource?
@@ -25,6 +28,12 @@ final class RecorderViewModel {
 
     /// Called on every state change so AppKit (the status-bar icon) can react.
     var onStateChange: ((AppState) -> Void)?
+
+    /// Set by AppDelegate so the popover's close (✕) button can dismiss it.
+    var onRequestClose: (() -> Void)?
+
+    /// Fires on each metering tick with the recent level buffer (drives the menu-bar waveform).
+    var onLevelChange: (([Double]) -> Void)?
 
     var isRecording: Bool {
         if case .recording = state { return true }
@@ -49,6 +58,9 @@ final class RecorderViewModel {
     // MARK: Dependencies
     private let whisper = WhisperEngine()
     private let ollama = OllamaClient()
+
+    /// Translation history store; set by AppDelegate.
+    var history: HistoryStore?
 
     // MARK: Recording internals
     private var recorder: AVAudioRecorder?
@@ -101,6 +113,11 @@ final class RecorderViewModel {
         Task { await prepare() }
     }
 
+    /// Called by AppDelegate when the global hotkey couldn't be registered.
+    func noteHotkeyUnavailable() {
+        flashNotice("Couldn't register \(GlasnikShortcut.display) — another app may be using it.")
+    }
+
     func performRecoveryAction(_ action: RecoveryAction) {
         switch action.kind {
         case .openMicrophoneSettings:
@@ -110,6 +127,13 @@ final class RecorderViewModel {
         case .copyCommand(let command):
             copyToPasteboard(command)
         }
+    }
+
+    /// Copies the current English translation to the clipboard (explicit Copy button).
+    func copyEnglish() {
+        guard !englishText.isEmpty else { return }
+        copyToPasteboard(englishText)
+        flashCopied()
     }
 
     // MARK: Recording
@@ -157,6 +181,7 @@ final class RecorderViewModel {
         recorder?.stop()
         recorder = nil
         level = 0
+        levelHistory = []
 
         guard let url = recordingURL, duration > 0.3 else {
             flashNotice("No speech detected — try again")
@@ -179,8 +204,13 @@ final class RecorderViewModel {
 
             setState(.translating)
             do {
-                // Preferred path: the LLM translates the Serbian source directly.
-                let english = try await ollama.translate(serbian)
+                // Preferred path: the LLM translates the Serbian source directly,
+                // honoring the user's tone + glossary preferences.
+                let english = try await ollama.translate(
+                    serbian,
+                    tone: TranslationPreferences.tone,
+                    glossary: TranslationPreferences.glossary
+                )
                 finish(english: english, source: .ollama, hint: nil)
             } catch {
                 // Ollama unavailable — fall back to Whisper's own translate task.
@@ -207,6 +237,16 @@ final class RecorderViewModel {
         copyToPasteboard(cleaned)
         flashCopied()
         setState(.done)
+        saveToHistory(serbian: serbianText, english: cleaned, source: source)
+    }
+
+    private func saveToHistory(serbian: String, english: String, source: TranslationSource) {
+        history?.add(
+            serbian: serbian,
+            english: english,
+            model: whisperModel,
+            source: source == .ollama ? "Ollama" : "Whisper"
+        )
     }
 
     // MARK: Helpers
@@ -247,6 +287,7 @@ final class RecorderViewModel {
     }
 
     private func setState(_ newState: AppState) {
+        Log.recorder.info("state → \(String(describing: newState), privacy: .public)")
         state = newState
         onStateChange?(newState)
     }
@@ -271,8 +312,10 @@ final class RecorderViewModel {
     // MARK: Metering (drives the pulse)
 
     private func startMetering() {
+        // Timer fires on the main run loop and we're already on the main actor, so
+        // update directly instead of allocating a Task per tick (20 Hz).
         meterTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.updateLevel() }
+            MainActor.assumeIsolated { self?.updateLevel() }
         }
     }
 
@@ -281,6 +324,9 @@ final class RecorderViewModel {
         recorder.updateMeters()
         let power = recorder.averagePower(forChannel: 0) // dBFS, roughly -160...0
         level = Double(max(0, min(1, (power + 55) / 55)))
+        levelHistory.append(level)
+        if levelHistory.count > 18 { levelHistory.removeFirst(levelHistory.count - 18) }
+        onLevelChange?(levelHistory)
     }
 
     private func stopMetering() {

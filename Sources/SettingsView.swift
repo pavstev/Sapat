@@ -1,24 +1,42 @@
 import SwiftUI
 
-/// Standard preferences window. For v1 the global shortcut is fixed (⌥⌘G); this
-/// surfaces it and a little about text. The same info also appears in the popover.
+/// Standard preferences window: translation tone + glossary, the global shortcut
+/// (⌥⇧Space), and a little about text. Tone/glossary persist via @AppStorage using the
+/// same keys TranslationPreferences reads.
 struct SettingsView: View {
+    @AppStorage(TranslationPreferences.toneKey) private var toneRaw = Tone.polished.rawValue
+    @AppStorage(TranslationPreferences.glossaryKey) private var glossary = ""
+
     var body: some View {
         Form {
+            Section("Translation") {
+                Picker("Tone", selection: $toneRaw) {
+                    ForEach(Tone.allCases) { tone in
+                        Text(tone.label).tag(tone.rawValue)
+                    }
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Glossary").font(.caption).foregroundStyle(.secondary)
+                    TextEditor(text: $glossary)
+                        .font(.callout)
+                        .frame(height: 80)
+                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
+                    Text("One term per line, e.g. “Đorđe = George”. Applied when Ollama is running.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
             Section("Global Shortcut") {
                 LabeledContent("Record toggle", value: GlasnikShortcut.display)
-                Text("Press \(GlasnikShortcut.display) from any app to start or stop recording.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
             Section("About") {
-                Text("Glasnik — record Serbian, get polished English. Transcription runs on-device with WhisperKit; a local Ollama model polishes the translation when it's running.")
+                Text("Glasnik — record Serbian, get polished English. On-device transcription with WhisperKit; optional local Ollama polish.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
-        .frame(width: 400)
+        .frame(width: 420)
         .padding()
     }
 }

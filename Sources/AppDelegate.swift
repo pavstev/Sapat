@@ -14,6 +14,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let popover = NSPopover()
     private var hotKey: GlobalHotKey?
 
+    /// JSON-backed translation history, shared with the popover's HistoryView.
+    private let historyStore = HistoryStore()
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         configurePopover()
         configureStatusItem()
@@ -21,6 +24,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         viewModel.onStateChange = { [weak self] state in
             self?.updateStatusIcon(for: state)
+        }
+        viewModel.onRequestClose = { [weak self] in
+            self?.popover.performClose(nil)
+        }
+        viewModel.onLevelChange = { [weak self] levels in
+            self?.updateWaveform(levels)
         }
 
         Task { await viewModel.prepare() }
@@ -30,10 +39,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: Setup
 
     private func configurePopover() {
-        popover.behavior = .transient
+        // Persistent: the popover stays open across app switches, Space switches,
+        // record clicks, and transcription. It closes only on the menu bar icon or
+        // the ✕ button. (`.transient` would dismiss it on any focus change.)
+        popover.behavior = .applicationDefined
+        viewModel.history = historyStore
         let rootView = PopoverView()
             .environment(viewModel)
             .environment(updateChecker)
+            .environment(historyStore)
         let hosting = NSHostingController(rootView: rootView)
         hosting.sizingOptions = [.preferredContentSize] // let the SwiftUI content size the popover
         popover.contentViewController = hosting
@@ -42,7 +56,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func configureStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         guard let button = statusItem.button else { return }
-        button.image = micImage(filled: false)
+        button.image = glyphImage()
         button.action = #selector(togglePopover)
         button.target = self
     }
@@ -50,9 +64,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func registerHotkey() {
         hotKey = GlobalHotKey(keyCode: GlasnikShortcut.keyCode, modifiers: GlasnikShortcut.modifiers) { [weak self] in
             // The Carbon hotkey callback fires on the main thread.
-            MainActor.assumeIsolated {
-                self?.handleHotkey()
-            }
+            MainActor.assumeIsolated { self?.handleHotkey() }
+        }
+        if hotKey == nil {
+            Log.app.error("Failed to register global hotkey \(GlasnikShortcut.display, privacy: .public)")
+            viewModel.noteHotkeyUnavailable()
+        } else {
+            Log.app.info("Registered global hotkey \(GlasnikShortcut.display, privacy: .public)")
         }
     }
 
@@ -69,7 +87,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func showPopover() {
         guard let button = statusItem.button else { return }
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-        popover.contentViewController?.view.window?.makeKeyAndOrderFront(nil)
+        // Keep the popover visible across all Spaces while it's open. (The red menu
+        // bar icon is the always-visible recording indicator regardless.)
+        if let window = popover.contentViewController?.view.window {
+            window.collectionBehavior.insert(.canJoinAllSpaces)
+            window.collectionBehavior.insert(.fullScreenAuxiliary)
+        }
         NSApp.activate(ignoringOtherApps: true)
     }
 
@@ -84,20 +107,56 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func updateStatusIcon(for state: AppState) {
         guard let button = statusItem.button else { return }
         if case .recording = state {
-            button.image = micImage(filled: true)
+            button.image = glyphImage()
             button.contentTintColor = .systemRed
         } else {
-            button.image = micImage(filled: false)
+            button.image = glyphImage()
             button.contentTintColor = nil
         }
     }
 
-    private func micImage(filled: Bool) -> NSImage? {
-        let image = NSImage(
-            systemSymbolName: filled ? "mic.fill" : "mic",
-            accessibilityDescription: "Glasnik"
-        )
-        image?.isTemplate = true
+    /// The bold Cyrillic Г, drawn as a monochrome template so the menu bar tints it
+    /// (default for idle, red while recording — until the waveform takes over).
+    private func glyphImage() -> NSImage {
+        let size = NSSize(width: 16, height: 16)
+        let image = NSImage(size: size)
+        image.lockFocus()
+        let font = NSFont.systemFont(ofSize: 14, weight: .bold)
+        let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.black]
+        let glyph = NSAttributedString(string: "Г", attributes: attributes)
+        let textSize = glyph.size()
+        glyph.draw(at: NSPoint(x: (size.width - textSize.width) / 2, y: (size.height - textSize.height) / 2))
+        image.unlockFocus()
+        image.isTemplate = true
+        return image
+    }
+
+    // MARK: Menu-bar waveform (while recording)
+
+    private func updateWaveform(_ levels: [Double]) {
+        guard let button = statusItem.button else { return }
+        button.image = waveformImage(levels)
+        button.contentTintColor = .systemRed
+    }
+
+    private func waveformImage(_ levels: [Double]) -> NSImage {
+        let size = NSSize(width: 22, height: 16)
+        let image = NSImage(size: size)
+        image.lockFocus()
+        NSColor.black.setFill()
+        let barWidth: CGFloat = 1.6
+        let gap: CGFloat = 1.4
+        let count = max(levels.count, 1)
+        let totalWidth = CGFloat(count) * barWidth + CGFloat(count - 1) * gap
+        var x = (size.width - totalWidth) / 2
+        for level in levels {
+            let barHeight = max(2, CGFloat(level) * size.height)
+            let rect = NSRect(x: x, y: (size.height - barHeight) / 2, width: barWidth, height: barHeight)
+            NSBezierPath(roundedRect: rect, xRadius: barWidth / 2, yRadius: barWidth / 2).fill()
+            x += barWidth + gap
+        }
+        image.unlockFocus()
+        image.isTemplate = true
         return image
     }
 }
