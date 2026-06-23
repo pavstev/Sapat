@@ -25,6 +25,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         viewModel.onRequestClose = { [weak self] in
             self?.popover.performClose(nil)
         }
+        viewModel.onLevelChange = { [weak self] levels in
+            self?.updateWaveform(levels)
+        }
 
         Task { await viewModel.prepare() }
         Task { await updateChecker.check() } // silent background check at launch
@@ -113,6 +116,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             accessibilityDescription: "Glasnik"
         )
         image?.isTemplate = true
+        return image
+    }
+
+    // MARK: Menu-bar waveform (while recording)
+
+    private func updateWaveform(_ levels: [Double]) {
+        guard let button = statusItem.button else { return }
+        button.image = waveformImage(levels)
+        button.contentTintColor = .systemRed
+    }
+
+    private func waveformImage(_ levels: [Double]) -> NSImage {
+        let size = NSSize(width: 22, height: 16)
+        let image = NSImage(size: size)
+        image.lockFocus()
+        NSColor.black.setFill()
+        let barWidth: CGFloat = 1.6
+        let gap: CGFloat = 1.4
+        let count = max(levels.count, 1)
+        let totalWidth = CGFloat(count) * barWidth + CGFloat(count - 1) * gap
+        var x = (size.width - totalWidth) / 2
+        for level in levels {
+            let barHeight = max(2, CGFloat(level) * size.height)
+            let rect = NSRect(x: x, y: (size.height - barHeight) / 2, width: barWidth, height: barHeight)
+            NSBezierPath(roundedRect: rect, xRadius: barWidth / 2, yRadius: barWidth / 2).fill()
+            x += barWidth + gap
+        }
+        image.unlockFocus()
+        image.isTemplate = true
         return image
     }
 }
