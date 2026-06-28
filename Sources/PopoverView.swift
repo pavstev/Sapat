@@ -23,7 +23,15 @@ struct PopoverView: View {
             header
             tabBar
             Group {
-                if tab == .record { recordContent } else { HistoryView() }
+                if tab == .record {
+                    recordContent
+                } else {
+                    HistoryView(onRetry: { record in
+                        // Retrying re-runs in the Record view, so jump there to show progress.
+                        withAnimation(.easeInOut(duration: 0.15)) { tab = .record }
+                        vm.retryFromHistory(record)
+                    })
+                }
             }
             footer
         }
@@ -54,13 +62,6 @@ struct PopoverView: View {
             }
 
             Spacer()
-
-            SettingsLink {
-                Image(systemName: "gearshape").font(.system(size: 15))
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(Theme.textTertiary)
-            .help("Settings")
 
             Button { vm.onRequestClose?() } label: {
                 Image(systemName: "xmark").font(.system(size: 14, weight: .medium))
@@ -105,6 +106,7 @@ struct PopoverView: View {
 
     private var recordContent: some View {
         VStack(spacing: Theme.s4) {
+            TonePicker()
             recordButton
             statusLine
             if let detail = vm.processingDetail { processingDetailView(detail) }

@@ -9,15 +9,16 @@ import Observation
 /// release `.zip`, verifies it against the published `.zip.sha256`, unzips + strips the
 /// Gatekeeper quarantine, atomically swaps the running `.app` in place, and relaunches.
 /// This works with the project's ad-hoc signing because the app is **non-sandboxed** and
-/// runs as the user — exactly what `scripts/install.sh` relies on. Auto-install is gated
-/// on a Settings toggle and on the app being idle (never swaps mid-recording).
+/// runs as the user — exactly what `scripts/install.sh` relies on. Auto-install is on by
+/// default and gated only on the app being idle (never swaps mid-recording).
 @MainActor
 @Observable
 final class UpdateChecker {
     /// "owner/repo" the GitHub Releases live under (see `Brand`).
     static let repository = Brand.repository
 
-    /// UserDefaults key shared with `SettingsView` (@AppStorage). Defaults to `true`.
+    /// UserDefaults key for the auto-update preference. There's no UI for it now (the app is
+    /// a single screen); it simply defaults to `true`.
     static let automaticUpdatesKey = "automaticUpdates"
 
     /// Where the updater is in the check → download → install lifecycle.
@@ -56,7 +57,7 @@ final class UpdateChecker {
         (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "0"
     }
 
-    /// Honors the Settings toggle; defaults to on when the user hasn't chosen.
+    /// Defaults to on when the user hasn't chosen otherwise.
     var automaticUpdates: Bool {
         UserDefaults.standard.object(forKey: Self.automaticUpdatesKey) as? Bool ?? true
     }

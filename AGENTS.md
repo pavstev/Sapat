@@ -17,15 +17,15 @@ Gatekeeper quarantine (the app is ad-hoc signed, not notarized), installs to
 `/Applications`, and launches it:
 
 ```sh
-git clone https://github.com/pavstev/Sapat.git
-cd Sapat
+git clone https://github.com/pavstev/sapat.git
+cd sapat
 ./scripts/install.sh
 ```
 
 No clone needed:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/pavstev/Sapat/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/pavstev/sapat/main/scripts/install.sh | bash
 ```
 
 Then tell the user:
@@ -79,7 +79,7 @@ state. To pick development back up on another Mac:
 1. **Prereqs:** macOS 14+, Command Line Tools (`xcode-select --install`), `git`, `gh`.
 2. **Identity:** `gh auth login` (GitHub account **pavstev**), then
    `git config user.name pavstev && git config user.email pavstev@users.noreply.github.com`.
-3. `git clone https://github.com/pavstev/Sapat.git && cd Sapat`
+3. `git clone https://github.com/pavstev/sapat.git && cd sapat`
 4. Build + run: `./bundle.sh && open Sapat.app` (first launch re-downloads the ~2.9 GB model).
 5. Read the **Conventions & gotchas** above before editing. History is in the commit log;
    in-flight work is in GitHub issues/PRs.
@@ -96,9 +96,15 @@ all derive from `Sources/Brand.swift` — change identity there, not scattered l
   output-only prompt + conservative sanitizer, long-form VAD silence tuning, mandatory
   auto-managed LM Studio (server + model via the `lms` CLI), whole-transcript
   chunk-and-merge refinement so long recordings aren't truncated, import of any-length
-  audio/video files (drag-and-drop or picker, audio extracted via `AudioImporter`), a
-  default Technical tone for precise engineering English, and normalized model-id matching
-  so the configured `qwen/qwen3-8b` resolves to whatever `lms get` actually downloads.
+  audio/video files (drag-and-drop or picker, audio extracted via `AudioImporter`), and
+  normalized model-id matching so the configured `qwen/qwen3-8b` resolves to whatever `lms
+  get` actually downloads. **No Settings screen** — the popover is the whole app; the one
+  preference (tone) is chosen inline via `TonePicker` (a dropdown of five presets, each with
+  a hover explanation), defaulting to Technical. **History keeps recordings**: every job
+  (live or imported) is stored with its audio linked; a failed transcription/refinement is
+  saved as a `failed` entry and offers **Retry** straight from History, re-running the kept
+  recording — and failed recordings are held out of `pruneOldRecordings` so a retry stays
+  possible.
 - **Deferred backlog** (good next tasks): a quit-mid-transcription guard
   (`applicationShouldTerminate` while busy); a real download/transcribe progress bar wired
   into `AppState.preparing(progress:)`; parse `lms get` progress into a percentage for the

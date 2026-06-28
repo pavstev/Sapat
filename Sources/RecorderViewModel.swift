@@ -104,6 +104,11 @@ final class RecorderViewModel {
         case imported(URL)  // the user's file — never delete
     }
     private var pending: PendingSource?
+    /// The history entry for the in-flight job. Held so a failure is recorded and a later
+    /// success (via Retry) updates the same entry instead of adding a duplicate. The date is
+    /// the original capture time, preserved across retries.
+    private var currentRecordID: UUID?
+    private var currentRecordDate: Date?
     private var copiedTask: Task<Void, Never>?
     private var noticeTask: Task<Void, Never>?
 
@@ -193,10 +198,9 @@ final class RecorderViewModel {
         } catch {
             importedFileName = nil
             processingDetail = nil
-            setState(.error(AppError(
-                message: "Couldn't read “\(url.lastPathComponent)”. \(error.localizedDescription)",
-                action: nil
-            )))
+            let message = "Couldn't read “\(url.lastPathComponent)”. \(error.localizedDescription)"
+            upsertHistory(serbian: "", english: "", status: .failed, error: message)
+            setState(.error(AppError(message: message, action: nil)))
             return
         }
         await transcribeAndRefine(audioPath: prepared.url.path)
@@ -236,6 +240,30 @@ final class RecorderViewModel {
             Task { await runImport(url: url) }
         default:
             Task { await prepare() }
+        }
+    }
+
+    /// Retry a job straight from History, re-running from its kept recording — the reason a
+    /// failed entry holds onto its audio. Reuses the entry's id/date so the History row flips
+    /// in place (failed → done) rather than spawning a duplicate. No-op while busy/recording.
+    func retryFromHistory(_ record: TranslationRecord) {
+        guard !isBusy, !isRecording else { return }
+        guard let url = record.audioURL, FileManager.default.fileExists(atPath: url.path) else {
+            flashNotice("That recording is no longer available to retry")
+            return
+        }
+        clearResults() // resets currentRecordID/date — re-set them below to update the same entry
+        currentRecordID = record.id
+        currentRecordDate = record.date
+        if record.importedPath != nil {
+            importedFileName = record.importedFileName ?? url.lastPathComponent
+            pending = .imported(url)
+            setState(.transcribing)
+            processingDetail = "Preparing \(url.lastPathComponent)…"
+            Task { await runImport(url: url) }
+        } else {
+            pending = .recording(url)
+            Task { await transcribeAndRefine(audioPath: url.path) }
         }
     }
 
@@ -338,10 +366,10 @@ final class RecorderViewModel {
         } catch {
             stopProcessingTimer()
             processingDetail = nil
-            setState(.error(AppError(
-                message: "Transcription failed. \(error.localizedDescription)",
-                action: nil
-            )))
+            let message = "Transcription failed. \(error.localizedDescription)"
+            // Record the failure with its recording kept, so it can be retried from History.
+            upsertHistory(serbian: "", english: "", status: .failed, error: message)
+            setState(.error(AppError(message: message, action: nil)))
             return
         }
         stopProcessingTimer()
@@ -381,7 +409,10 @@ final class RecorderViewModel {
         } catch {
             setLMStudioStatus(nil)
             processingDetail = nil
-            setState(.error(lmStudioError(for: error)))
+            let appError = lmStudioError(for: error)
+            // Keep the transcript + recording in History so the refine can be retried.
+            upsertHistory(serbian: serbianText, english: "", status: .failed, error: appError.message)
+            setState(.error(appError))
         }
     }
 
@@ -423,14 +454,45 @@ final class RecorderViewModel {
         copyToPasteboard(cleaned)
         flashCopied()
         setState(.done)
-        saveToHistory(serbian: serbianText, english: cleaned)
-        // Succeeded — the durable recording is no longer needed for retry.
-        if case .recording(let url)? = pending { try? FileManager.default.removeItem(at: url) }
+        // Record the success, keeping the recording linked. We no longer delete it here:
+        // it stays in History (bounded by `pruneOldRecordings`) so the entry can be re-run.
+        upsertHistory(serbian: serbianText, english: cleaned, status: .completed, error: nil)
         pending = nil
     }
 
-    private func saveToHistory(serbian: String, english: String) {
-        history?.add(serbian: serbian, english: english, model: whisperModel, source: "LM Studio")
+    /// Insert/update the in-flight job's History entry, carrying its recording reference so a
+    /// failed entry can be retried later. Reuses `currentRecordID`/`currentRecordDate` so a
+    /// retry updates the same entry instead of creating a duplicate.
+    private func upsertHistory(serbian: String, english: String, status: RecordStatus, error: String?) {
+        guard let history else { return }
+        let id = currentRecordID ?? UUID()
+        let date = currentRecordDate ?? .now
+        currentRecordID = id
+        currentRecordDate = date
+        let audio = audioReference()
+        history.upsert(TranslationRecord(
+            id: id,
+            date: date,
+            serbian: serbian,
+            english: english,
+            model: whisperModel,
+            source: "LM Studio",
+            status: status,
+            errorMessage: error,
+            audioFileName: audio.audioFileName,
+            importedPath: audio.importedPath,
+            importedFileName: audio.importedFileName
+        ))
+    }
+
+    /// The recording behind the current job, as History stores it: a basename for a live
+    /// capture we own, or an absolute path for the user's imported file.
+    private func audioReference() -> (audioFileName: String?, importedPath: String?, importedFileName: String?) {
+        switch pending {
+        case .recording(let url): return (url.lastPathComponent, nil, nil)
+        case .imported(let url): return (nil, url.path, url.lastPathComponent)
+        case nil: return (nil, nil, nil)
+        }
     }
 
     // MARK: Helpers
@@ -480,6 +542,8 @@ final class RecorderViewModel {
         importedFileName = nil
         transcriptionFraction = 0
         pending = nil
+        currentRecordID = nil
+        currentRecordDate = nil
     }
 
     private func setState(_ newState: AppState) {
@@ -608,12 +672,17 @@ final class RecorderViewModel {
             at: dir, includingPropertiesForKeys: [.contentModificationDateKey]) else { return }
         let wavs = files.filter { $0.pathExtension == "wav" }
         guard wavs.count > limit else { return }
+        // Never prune a recording that backs a failed History entry — keeping it retryable is
+        // the whole point of holding onto it.
+        let protected = history?.protectedAudioFileNames ?? []
         let byNewest = wavs.sorted {
             let lhs = (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
             let rhs = (try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
             return lhs > rhs
         }
-        for url in byNewest.dropFirst(limit) { try? fm.removeItem(at: url) }
+        for url in byNewest.dropFirst(limit) where !protected.contains(url.lastPathComponent) {
+            try? fm.removeItem(at: url)
+        }
     }
 
     // MARK: Clipboard + confirmations

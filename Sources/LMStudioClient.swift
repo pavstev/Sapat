@@ -20,7 +20,7 @@ struct LMStudioClient {
     /// LM Studio's native REST API — reports per-model `state` + `loaded_context_length`,
     /// which the OpenAI-compatible surface doesn't expose.
     var modelsEndpoint = URL(string: "http://localhost:1234/api/v0/models")!
-    /// Model id to request. Configurable in Settings; defaults to the bundled choice.
+    /// Model id to request. Defaults to the bundled choice (`TranslationPreferences.defaultModel`).
     var model = TranslationPreferences.model
     /// Long transcripts + a larger MLX model need headroom over the old 45s.
     var timeout: TimeInterval = 120

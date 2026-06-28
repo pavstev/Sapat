@@ -9,15 +9,16 @@ import SwiftUI
 /// to open a `MenuBarExtra` window programmatically — and the global hotkey must be
 /// able to pop the window open from any app.
 ///
-/// The only SwiftUI `Scene` is `Settings`, which provides the standard preferences
-/// window (reachable via the hotkey recorder embedded in the popover footer too).
+/// There is no Settings screen: the popover is the whole app, and the one preference
+/// (tone) is chosen inline via `TonePicker`. SwiftUI's `App` still requires a `Scene`,
+/// and an empty `Settings` is the only one that never spawns a visible window — and an
+/// agent app has no app menu, so it surfaces nothing to the user either. It's an inert
+/// placeholder so all real UI stays in the AppKit popover.
 @main
 struct SapatApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        Settings {
-            SettingsView()
-        }
+        Settings { EmptyView() }
     }
 }

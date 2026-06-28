@@ -7,10 +7,10 @@
 <p align="center">A native macOS menu bar app that turns Serbian speech into clean, precise English — on-device.</p>
 
 <p align="center">
-  <a href="https://github.com/pavstev/Sapat/actions/workflows/ci.yml"><img src="https://github.com/pavstev/Sapat/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://github.com/pavstev/Sapat/releases/latest"><img src="https://img.shields.io/github/v/release/pavstev/Sapat?sort=semver" alt="Latest release"></a>
+  <a href="https://github.com/pavstev/sapat/actions/workflows/ci.yml"><img src="https://github.com/pavstev/sapat/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/pavstev/sapat/releases/latest"><img src="https://img.shields.io/github/v/release/pavstev/sapat?sort=semver" alt="Latest release"></a>
   <img src="https://img.shields.io/badge/macOS-14%2B-blue" alt="macOS 14+">
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/pavstev/Sapat" alt="MIT"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/pavstev/sapat" alt="MIT"></a>
 </p>
 
 ---
@@ -46,17 +46,17 @@ any that leak). Tone presets and a glossary tune the result.
 - **Import any recording** — pick or drag in an audio **or video** file of any length; the audio track is extracted, silence is skipped, and it's transcribed + refined like a live take, with elapsed-time and per-section progress.
 - **Local refinement (required)** — LM Studio (`qwen/qwen3-8b`, MLX) deduplicates and formalizes the transcript into concise, precise English without fabricating; output-only. It's the only refinement path — there is no Whisper fallback.
 - **Auto-managed** — on launch Šapat starts LM Studio's server, installs the MLX runtime, and downloads + loads the model itself; if it can't, your transcript stays on screen with a clear Retry.
-- **Technical by default** — the default tone produces precise, professional engineering English (configurable in Settings).
+- **Technical by default** — the default tone produces precise, professional engineering English (switch tones from the on-screen dropdown).
 - **Whole-recording guarantee** — long transcripts that exceed the model's context are split on sentence boundaries, refined piece by piece, then merged + de-duped, so the **beginning is never silently dropped**.
-- **Tone & glossary**, plus a configurable model id (Settings).
-- **Concise history** — searchable, with tap-to-expand rows.
+- **Five tone presets** — pick from a dropdown on the only screen; hover a tone for a one-line explanation of what it does. No settings window.
+- **Concise history that keeps your recordings** — searchable, tap-to-expand rows. If a transcription or refinement fails, the entry is kept with its recording so you can **Retry** it straight from History; nothing said is lost.
 - **Global hotkey** `⌥⇧Space` to start/stop; **Esc** cancels a recording. The menu bar **Ш** animates as a live waveform while recording, with a live timer and first-run model-download progress in the popover.
 - **Automatic updates** — checks GitHub Releases, then downloads, checksum-verifies, swaps the bundle in place, and relaunches.
 
 ## Install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/pavstev/Sapat/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/pavstev/sapat/main/scripts/install.sh | bash
 ```
 
 Cleans up any prior install, downloads the latest release, strips the Gatekeeper quarantine
@@ -76,7 +76,7 @@ LM Studio does the refinement, so it's required. You don't have to configure it:
 Šapat finds the `lms` CLI, starts the server (`:1234`), and downloads + loads the model
 (`qwen/qwen3-8b` MLX, ~5 GB) with a generous context window. If LM Studio can't be made ready,
 Šapat keeps your transcript on screen and offers **Retry** + **Open LM Studio** rather than
-producing a rougher result. The model id is configurable in Settings.
+producing a rougher result. The model id defaults to `qwen/qwen3-8b`.
 
 ## Build from source
 
@@ -84,7 +84,7 @@ No full Xcode needed — Šapat builds with the Command Line Tools via SwiftPM.
 
 ```sh
 xcode-select --install
-git clone https://github.com/pavstev/Sapat.git && cd Sapat
+git clone https://github.com/pavstev/sapat.git && cd sapat
 ./bundle.sh && open Sapat.app        # swift build + assemble & ad-hoc sign
 ```
 
@@ -112,7 +112,7 @@ updater picks up. Every push/PR to `main` is build-checked + tested by
 | `Sources/AudioImporter.swift` | Normalizes a picked/dropped audio or video file for WhisperKit |
 | `Sources/OutputSanitizer.swift` | Conservative scaffolding stripper (never eats real content) |
 | `Sources/HistoryStore.swift` · `HistoryView.swift` | JSON history + concise collapsible UI |
-| `Sources/PopoverView.swift` · `Theme.swift` | SwiftUI popover + copper-on-stone design tokens |
+| `Sources/PopoverView.swift` · `TonePicker.swift` · `Theme.swift` | SwiftUI popover, on-screen tone dropdown, copper-on-stone design tokens |
 | `Sources/UpdateChecker.swift` | GitHub Releases auto-updater (download → verify → swap) |
 | `Sources/GlobalHotKey.swift` | Carbon `RegisterEventHotKey` wrapper (⌥⇧Space) |
 | `bundle.sh` · `scripts/` · `.github/workflows/` | Build/assemble, install/cleanup, CI + release |

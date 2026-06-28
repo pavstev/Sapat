@@ -16,7 +16,7 @@ enum Brand {
     /// Reverse-DNS bundle identifier — also the `os.Logger` subsystem.
     static let bundleID = "com.stevanpavlovic.Sapat"
     /// "owner/repo" the GitHub Releases live under (in-app updater + installer script).
-    static let repository = "pavstev/Sapat"
+    static let repository = "pavstev/sapat"
 
     /// `~/Library/Application Support/Sapat`, created on first access.
     static func applicationSupportDirectory() throws -> URL {

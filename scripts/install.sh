@@ -5,10 +5,10 @@
 #
 #   ./scripts/install.sh
 # or, without cloning the repo:
-#   curl -fsSL https://raw.githubusercontent.com/pavstev/Sapat/main/scripts/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/pavstev/sapat/main/scripts/install.sh | bash
 set -euo pipefail
 
-REPO="pavstev/Sapat"
+REPO="pavstev/sapat"
 APP="/Applications/Sapat.app"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || true)"
 

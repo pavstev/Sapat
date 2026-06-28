@@ -1,7 +1,16 @@
 import Foundation
 import Observation
 
-/// One persisted Serbian→English translation.
+/// Outcome of a translation job. Old history files predate this field and held only
+/// successful translations, so a missing value decodes to `.completed`.
+enum RecordStatus: String, Codable {
+    case completed
+    case failed
+}
+
+/// One persisted Serbian→English job — completed or failed. A failed entry keeps a link to
+/// its recording (the live WAV we own, or the user's imported file) so the job can be
+/// retried straight from History, and so nothing said is ever lost to a transient failure.
 struct TranslationRecord: Codable, Identifiable, Equatable {
     let id: UUID
     let date: Date
@@ -9,14 +18,82 @@ struct TranslationRecord: Codable, Identifiable, Equatable {
     let english: String
     let model: String
     let source: String // "LM Studio" or "Whisper"
+    let status: RecordStatus
+    /// Why a failed job failed (user-facing); nil for completed entries.
+    let errorMessage: String?
+    /// Basename of the durable WAV in `Brand.recordingsDirectory()` for a live capture —
+    /// the audio we keep so a failed run can be retried. Nil once pruned or never recorded.
+    let audioFileName: String?
+    /// Absolute path to the user's own file for an imported recording (we never delete it).
+    let importedPath: String?
+    /// Display name for an imported recording.
+    let importedFileName: String?
 
-    init(id: UUID = UUID(), date: Date, serbian: String, english: String, model: String, source: String) {
+    init(
+        id: UUID = UUID(),
+        date: Date,
+        serbian: String,
+        english: String,
+        model: String,
+        source: String,
+        status: RecordStatus = .completed,
+        errorMessage: String? = nil,
+        audioFileName: String? = nil,
+        importedPath: String? = nil,
+        importedFileName: String? = nil
+    ) {
         self.id = id
         self.date = date
         self.serbian = serbian
         self.english = english
         self.model = model
         self.source = source
+        self.status = status
+        self.errorMessage = errorMessage
+        self.audioFileName = audioFileName
+        self.importedPath = importedPath
+        self.importedFileName = importedFileName
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, date, serbian, english, model, source
+        case status, errorMessage, audioFileName, importedPath, importedFileName
+    }
+
+    /// Tolerant decode: records written before the failure-tracking fields existed carry only
+    /// the core translation keys, so the new fields default (status → `.completed`).
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        date = try c.decode(Date.self, forKey: .date)
+        serbian = try c.decodeIfPresent(String.self, forKey: .serbian) ?? ""
+        english = try c.decodeIfPresent(String.self, forKey: .english) ?? ""
+        model = try c.decodeIfPresent(String.self, forKey: .model) ?? ""
+        source = try c.decodeIfPresent(String.self, forKey: .source) ?? "LM Studio"
+        status = try c.decodeIfPresent(RecordStatus.self, forKey: .status) ?? .completed
+        errorMessage = try c.decodeIfPresent(String.self, forKey: .errorMessage)
+        audioFileName = try c.decodeIfPresent(String.self, forKey: .audioFileName)
+        importedPath = try c.decodeIfPresent(String.self, forKey: .importedPath)
+        importedFileName = try c.decodeIfPresent(String.self, forKey: .importedFileName)
+    }
+
+    var isFailed: Bool { status == .failed }
+
+    /// The audio backing this entry, if one was linked. Live captures live in the app's
+    /// Recordings folder; imports point at the user's own file. The file may have been
+    /// pruned (or moved, for an import) since — check `audioExists` before relying on it.
+    var audioURL: URL? {
+        if let importedPath { return URL(fileURLWithPath: importedPath) }
+        if let audioFileName, let dir = try? Brand.recordingsDirectory() {
+            return dir.appendingPathComponent(audioFileName)
+        }
+        return nil
+    }
+
+    /// Whether the recording is still on disk, i.e. whether the job can be retried.
+    var audioExists: Bool {
+        guard let audioURL else { return false }
+        return FileManager.default.fileExists(atPath: audioURL.path)
     }
 }
 
@@ -37,17 +114,31 @@ final class HistoryStore {
         load()
     }
 
-    func add(serbian: String, english: String, model: String, source: String) {
-        records.insert(
-            TranslationRecord(date: .now, serbian: serbian, english: english, model: model, source: source),
-            at: 0
-        )
+    /// Insert a new record at the top, or replace an existing one in place (matched by `id`).
+    /// Retrying a failed job reuses its id, so this updates that entry instead of duplicating
+    /// it — a failure that later succeeds simply flips to a completed entry.
+    func upsert(_ record: TranslationRecord) {
+        if let index = records.firstIndex(where: { $0.id == record.id }) {
+            records[index] = record
+        } else {
+            records.insert(record, at: 0)
+        }
         save()
     }
 
     func delete(_ record: TranslationRecord) {
         records.removeAll { $0.id == record.id }
+        // Reclaim the disk for a live capture we own — never the user's imported file.
+        if let name = record.audioFileName, let dir = try? Brand.recordingsDirectory() {
+            try? FileManager.default.removeItem(at: dir.appendingPathComponent(name))
+        }
         save()
+    }
+
+    /// Basenames of recordings that back a *failed* entry — held out of pruning so a retry
+    /// stays possible for as long as the failed entry exists.
+    var protectedAudioFileNames: Set<String> {
+        Set(records.compactMap { $0.isFailed ? $0.audioFileName : nil })
     }
 
     private func load() {

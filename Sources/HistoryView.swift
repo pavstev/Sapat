@@ -6,6 +6,9 @@ import SwiftUI
 /// collapsed shows a one-line preview, expanded reveals the full text + actions.
 struct HistoryView: View {
     @Environment(HistoryStore.self) private var store
+    /// Re-runs a stored job from its kept recording (used by failed entries). The parent
+    /// switches to the Record tab so the retry's progress is visible.
+    let onRetry: (TranslationRecord) -> Void
     @State private var search = ""
     /// Ids of rows currently expanded. Held here (not per-row @State) so expansion
     /// survives search-filtering and LazyVStack recycling.
@@ -25,7 +28,8 @@ struct HistoryView: View {
                                 isExpanded: expanded.contains(item.id),
                                 onToggle: { toggle(item) },
                                 onCopy: { copy(item.english) },
-                                onDelete: { delete(item) }
+                                onDelete: { delete(item) },
+                                onRetry: { onRetry(item) }
                             )
                         }
                     }
@@ -110,21 +114,35 @@ struct HistoryView: View {
     }
 }
 
-/// One concise, tap-to-expand history entry.
+/// One concise, tap-to-expand history entry — completed or failed.
 ///
-/// Collapsed: a single English preview line + a small `source · date` meta line,
-/// fronted by a chevron that rotates when open. Tapping anywhere toggles it.
-/// Expanded: full selectable English, the Serbian source, and copy/delete actions.
+/// Collapsed: a one-line preview (the English, or the kept Serbian / a "couldn't transcribe"
+/// note for a failure) + a small `source · date` meta line, fronted by a chevron that rotates
+/// when open. Tapping anywhere toggles it. Expanded: a completed entry shows the full
+/// selectable English + Serbian source + copy/delete; a failed entry shows the error, any
+/// transcript, and Retry (from the kept recording) + delete.
 private struct HistoryRow: View {
     let item: TranslationRecord
     let isExpanded: Bool
     let onToggle: () -> Void
     let onCopy: () -> Void
     let onDelete: () -> Void
+    let onRetry: () -> Void
 
     @State private var justCopied = false
 
-    private var sourceIcon: String { item.source == "LM Studio" ? "sparkles" : "waveform" }
+    private var isFailed: Bool { item.isFailed }
+
+    private var sourceIcon: String {
+        if isFailed { return "exclamationmark.triangle.fill" }
+        return item.source == "LM Studio" ? "sparkles" : "waveform"
+    }
+
+    /// The collapsed one-liner: the result for a success, else whatever we salvaged.
+    private var preview: String {
+        if !isFailed { return item.english }
+        return item.serbian.isEmpty ? "Recording couldn’t be transcribed" : item.serbian
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -143,9 +161,9 @@ private struct HistoryRow: View {
                         if isExpanded {
                             metaLine(compact: false)
                         } else {
-                            Text(item.english)
+                            Text(preview)
                                 .font(.system(size: 13))
-                                .foregroundStyle(Theme.textPrimary)
+                                .foregroundStyle(isFailed ? Theme.textSecondary : Theme.textPrimary)
                                 .lineLimit(1)
                                 .truncationMode(.tail)
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -158,58 +176,15 @@ private struct HistoryRow: View {
             }
             .buttonStyle(.plain)
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel(item.english)
+            .accessibilityLabel(isFailed ? "Failed: \(preview)" : item.english)
             .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
             .accessibilityHint(isExpanded ? "Collapse details" : "Expand details")
 
-            // Detail — revealed on expand. Full English lives here (outside the toggle
-            // Button) so it is actually selectable; the Serbian source follows.
+            // Detail — revealed on expand. Full text lives here (outside the toggle Button)
+            // so it is actually selectable.
             if isExpanded {
-                VStack(alignment: .leading, spacing: Theme.s2) {
-                    Text(item.english)
-                        .font(.system(size: 13))
-                        .foregroundStyle(Theme.textPrimary)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-
-                    if !item.serbian.isEmpty {
-                        VStack(alignment: .leading, spacing: Theme.s1) {
-                            Text("Serbian")
-                                .font(.system(size: 10, weight: .medium))
-                                .textCase(.uppercase)
-                                .foregroundStyle(Theme.textTertiary)
-                            Text(item.serbian)
-                                .font(.caption)
-                                .foregroundStyle(Theme.textSecondary)
-                                .textSelection(.enabled)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                    }
-
-                    Rectangle()
-                        .fill(Theme.hairline)
-                        .frame(height: 0.5)
-
-                    HStack(spacing: Theme.s3) {
-                        Spacer()
-                        Button(action: copy) {
-                            Label(justCopied ? "Copied" : "Copy",
-                                  systemImage: justCopied ? "checkmark" : "doc.on.doc")
-                                .font(.system(size: 11))
-                                .labelStyle(.titleAndIcon)
-                                .foregroundStyle(justCopied ? Theme.positive : Theme.copperLight)
-                        }
-                        .buttonStyle(.plain)
-                        .help("Copy English")
-
-                        Button(action: onDelete) {
-                            Image(systemName: "trash")
-                                .font(.system(size: 11))
-                                .foregroundStyle(Theme.textTertiary)
-                        }
-                        .buttonStyle(.plain)
-                        .help("Delete")
-                    }
+                Group {
+                    if isFailed { failedDetail } else { completedDetail }
                 }
                 .padding(.top, Theme.s2)
                 .padding(.leading, Theme.s4 + Theme.s1) // align under the preview text
@@ -219,6 +194,12 @@ private struct HistoryRow: View {
         .padding(Theme.s3)
         .frame(maxWidth: .infinity, alignment: .leading)
         .cardSurface(Theme.rSmall)
+        .overlay {
+            if isFailed {
+                RoundedRectangle(cornerRadius: Theme.rSmall, style: .continuous)
+                    .strokeBorder(Theme.recording.opacity(0.3), lineWidth: 0.5)
+            }
+        }
         // Auto-clear the transient "Copied" confirmation.
         .task(id: justCopied) {
             guard justCopied else { return }
@@ -227,17 +208,125 @@ private struct HistoryRow: View {
         }
     }
 
-    /// `source-icon · relative-date` (compact) or absolute timestamp (expanded).
+    // MARK: Completed detail — the translation + source + copy/delete
+
+    private var completedDetail: some View {
+        VStack(alignment: .leading, spacing: Theme.s2) {
+            Text(item.english)
+                .font(.system(size: 13))
+                .foregroundStyle(Theme.textPrimary)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            serbianBlock
+
+            divider
+
+            HStack(spacing: Theme.s3) {
+                Spacer()
+                Button(action: copy) {
+                    Label(justCopied ? "Copied" : "Copy",
+                          systemImage: justCopied ? "checkmark" : "doc.on.doc")
+                        .font(.system(size: 11))
+                        .labelStyle(.titleAndIcon)
+                        .foregroundStyle(justCopied ? Theme.positive : Theme.copperLight)
+                }
+                .buttonStyle(.plain)
+                .help("Copy English")
+
+                deleteButton
+            }
+        }
+    }
+
+    // MARK: Failed detail — what went wrong + transcript + Retry/delete
+
+    private var failedDetail: some View {
+        VStack(alignment: .leading, spacing: Theme.s2) {
+            if let message = item.errorMessage, !message.isEmpty {
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(Theme.textSecondary)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            serbianBlock
+
+            divider
+
+            HStack(spacing: Theme.s3) {
+                if !item.audioExists {
+                    Text("Recording no longer available")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.textTertiary)
+                }
+                Spacer()
+                if item.audioExists {
+                    Button(action: onRetry) {
+                        Label("Retry", systemImage: "arrow.clockwise")
+                            .font(.system(size: 11, weight: .medium))
+                            .labelStyle(.titleAndIcon)
+                            .foregroundStyle(Theme.copperLight)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Re-run this recording")
+                }
+                deleteButton
+            }
+        }
+    }
+
+    // MARK: Shared pieces
+
+    @ViewBuilder private var serbianBlock: some View {
+        if !item.serbian.isEmpty {
+            VStack(alignment: .leading, spacing: Theme.s1) {
+                Text("Serbian")
+                    .font(.system(size: 10, weight: .medium))
+                    .textCase(.uppercase)
+                    .foregroundStyle(Theme.textTertiary)
+                Text(item.serbian)
+                    .font(.caption)
+                    .foregroundStyle(Theme.textSecondary)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    private var divider: some View {
+        Rectangle().fill(Theme.hairline).frame(height: 0.5)
+    }
+
+    private var deleteButton: some View {
+        Button(action: onDelete) {
+            Image(systemName: "trash")
+                .font(.system(size: 11))
+                .foregroundStyle(Theme.textTertiary)
+        }
+        .buttonStyle(.plain)
+        .help("Delete")
+    }
+
+    /// `source-icon · relative-date` (compact) or absolute timestamp (expanded), with a
+    /// "Failed" tag for failed entries so the status reads at a glance.
     private func metaLine(compact: Bool) -> some View {
         HStack(spacing: Theme.s1 + 2) {
             Image(systemName: sourceIcon)
                 .font(.system(size: 10))
-                .foregroundStyle(Theme.textTertiary)
+                .foregroundStyle(isFailed ? Theme.recording : Theme.textTertiary)
             Text(compact
                  ? item.date.formatted(.relative(presentation: .named))
                  : item.date.formatted(.dateTime.month().day().hour().minute()))
                 .font(.system(size: 11))
                 .foregroundStyle(Theme.textTertiary)
+            if isFailed {
+                Text("Failed")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Theme.recording)
+            }
         }
     }
 
