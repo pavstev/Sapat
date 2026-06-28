@@ -15,6 +15,13 @@ final class RecorderViewModel {
     private let whisperModel = "openai_whisper-large-v3"
     private let sourceLanguage = "sr" // Serbian
 
+    // Recording format: 16 kHz mono 16-bit PCM WAV — exactly what WhisperKit wants.
+    private static let sampleRate = 16_000.0
+    private static let channelCount = 1
+    private static let bitDepth = 16
+    /// Below this, a "recording" is a stray tap, not speech.
+    private static let minRecordingSeconds: TimeInterval = 0.3
+
     // MARK: Observed state (read by the view)
     private(set) var state: AppState = .preparing(progress: nil)
     private(set) var level: Double = 0 // mic level 0...1, drives the record-button pulse
@@ -272,13 +279,12 @@ final class RecorderViewModel {
         let url = Self.newRecordingURL()
         try? FileManager.default.removeItem(at: url)
 
-        // 16 kHz mono 16-bit PCM WAV — exactly what WhisperKit wants. AVAudioRecorder
-        // handles the conversion from the hardware format internally.
+        // AVAudioRecorder converts from the hardware format to our target format internally.
         let settings: [String: Any] = [
             AVFormatIDKey: Int(kAudioFormatLinearPCM),
-            AVSampleRateKey: 16_000.0,
-            AVNumberOfChannelsKey: 1,
-            AVLinearPCMBitDepthKey: 16,
+            AVSampleRateKey: Self.sampleRate,
+            AVNumberOfChannelsKey: Self.channelCount,
+            AVLinearPCMBitDepthKey: Self.bitDepth,
             AVLinearPCMIsFloatKey: false,
             AVLinearPCMIsBigEndianKey: false
         ]
@@ -312,7 +318,7 @@ final class RecorderViewModel {
         levelHistory = []
         recordingDuration = 0
 
-        guard let url = recordingURL, duration > 0.3 else {
+        guard let url = recordingURL, duration > Self.minRecordingSeconds else {
             if let url = recordingURL { try? FileManager.default.removeItem(at: url) } // nothing worth keeping
             recordingURL = nil
             flashNotice("No speech detected — try again")
@@ -389,30 +395,20 @@ final class RecorderViewModel {
             try await existing.value
             return
         }
-
-        let client = llm
-        let manager = lmStudio
-        let modelKey = TranslationPreferences.model
-        // bufferingNewest(1): keep only the latest progress line so fast download updates
-        // (many per second) never flood the UI — we always show the most recent.
-        let (statuses, continuation) = AsyncStream<String>.makeStream(bufferingPolicy: .bufferingNewest(1))
-
-        let task = Task.detached {
-            defer { continuation.finish() }
-            try await manager.ensureReady(modelKey: modelKey, client: client) { status in
-                continuation.yield(status)
-            }
-        }
+        // Coalesce concurrent callers (the launch warm-up + a refine) onto one readiness run
+        // so two `lms` downloads/loads never run at once. The task inherits this main actor,
+        // so the progress callback can update state directly; the manager throttles it.
+        let task = Task { try await self.performReadiness() }
         readinessTask = task
-        // Clear on every exit (success, throw, or this awaiting task being cancelled) so a
-        // failed warm-up never pins a dead task that later callers would await forever.
-        defer {
-            readinessTask = nil
-            setLMStudioStatus(nil)
-        }
-
-        for await status in statuses { setLMStudioStatus(status) }
+        defer { readinessTask = nil }
         try await task.value // re-throws any setup failure to the caller
+    }
+
+    private func performReadiness() async throws {
+        defer { setLMStudioStatus(nil) }
+        try await lmStudio.ensureReady(modelKey: TranslationPreferences.model, client: llm) { [weak self] status in
+            Task { @MainActor in self?.setLMStudioStatus(status) }
+        }
     }
 
     private func finish(english: String) {
@@ -440,6 +436,7 @@ final class RecorderViewModel {
     // MARK: Helpers
 
     private func setLMStudioStatus(_ status: String?) {
+        guard status != lmStudioStatus else { return } // avoid redundant SwiftUI invalidations
         lmStudioStatus = status
     }
 

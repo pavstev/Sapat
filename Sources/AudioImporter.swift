@@ -15,14 +15,22 @@ enum AudioImporter {
         let isTemporary: Bool
     }
 
+    // MARK: - Preparing
+
     static func prepare(_ url: URL) async throws -> Prepared {
         // Fast path: AVAudioFile can read it as-is (covers most dictation recordings).
         if (try? AVAudioFile(forReading: url)) != nil {
             return Prepared(url: url, isTemporary: false)
         }
         // Otherwise pull the audio track out of the container (handles video + exotic formats).
-        let extracted = try await exportAudioTrack(from: url)
-        return Prepared(url: extracted, isTemporary: true)
+        Log.recorder.info("Import: extracting audio track from \(url.lastPathComponent, privacy: .public)")
+        do {
+            let extracted = try await exportAudioTrack(from: url)
+            return Prepared(url: extracted, isTemporary: true)
+        } catch {
+            Log.recorder.error("Import: audio extraction failed: \(error.localizedDescription, privacy: .public)")
+            throw error
+        }
     }
 
     /// Removes a temp file produced by `prepare`. No-op for pass-through originals.
@@ -66,7 +74,7 @@ enum AudioImporter {
         return output
     }
 
-    enum ImportError: LocalizedError {
+    enum ImportError: LocalizedError, Equatable {
         case noAudioTrack
         case exportUnavailable
         case exportFailed(String)

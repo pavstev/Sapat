@@ -44,10 +44,10 @@ any that leak). Tone presets and a glossary tune the result.
 
 - **On-device transcription** — WhisperKit `large-v3` with VAD silence handling, tuned for long, pause-heavy monologues (5–10 min).
 - **Import any recording** — pick or drag in an audio **or video** file of any length; the audio track is extracted, silence is skipped, and it's transcribed + refined like a live take, with elapsed-time and per-section progress.
-- **Local refinement** — LM Studio (`qwen/qwen3-8b`, MLX) deduplicates and formalizes into concise English without fabricating; output-only.
+- **Local refinement (required)** — LM Studio (`qwen/qwen3-8b`, MLX) deduplicates and formalizes the transcript into concise, precise English without fabricating; output-only. It's the only refinement path — there is no Whisper fallback.
+- **Auto-managed** — on launch Šapat starts LM Studio's server, installs the MLX runtime, and downloads + loads the model itself; if it can't, your transcript stays on screen with a clear Retry.
 - **Technical by default** — the default tone produces precise, professional engineering English (configurable in Settings).
 - **Whole-recording guarantee** — long transcripts that exceed the model's context are split on sentence boundaries, refined piece by piece, then merged + de-duped, so the **beginning is never silently dropped**.
-- **Auto-managed LM Studio** — on launch Šapat starts LM Studio's server and downloads + loads the model itself; if it can't, the transcript stays on screen with a clear Retry.
 - **Tone & glossary**, plus a configurable model id (Settings).
 - **Concise history** — searchable, with tap-to-expand rows.
 - **Global hotkey** `⌥⇧Space` to start/stop; **Esc** cancels a recording. The menu bar **Ш** animates as a live waveform while recording, with a live timer and first-run model-download progress in the popover.

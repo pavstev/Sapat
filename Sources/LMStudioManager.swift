@@ -1,14 +1,15 @@
 import Foundation
 
 /// Makes LM Studio mandatory by driving its `lms` CLI: locate the tool, start the local
-/// server, and make sure the configured model is downloaded and loaded — then it's reused,
-/// never re-fetched. When it genuinely can't be made ready, `ensureReady` throws and the
-/// caller shows an actionable error (no silent fallback to the inferior Whisper path).
+/// server, install the MLX runtime, and make sure the configured model is downloaded and
+/// loaded — then it's reused, never re-fetched. When it genuinely can't be made ready,
+/// `ensureReady` throws and the caller shows an actionable error (no silent fallback to the
+/// inferior Whisper path).
 ///
 /// The download is resume-and-retry: `lms get` reports real progress and resumes a partial
 /// `.part`, but its HuggingFace transfer can time out near the end — so we retry it (each
 /// attempt resumes) until the model is actually present, rather than re-pulling from zero
-/// or giving up. Progress is streamed out as ready-to-display strings.
+/// or giving up. Progress is streamed out as ready-to-display strings (throttled).
 struct LMStudioManager {
     /// Context window to request when we load the model ourselves — generous headroom so
     /// most recordings refine in a single pass. (The client still chunks if a transcript
@@ -16,8 +17,31 @@ struct LMStudioManager {
     var preferredContextLength = 8192
     /// Auto-unload the model after this long idle, so we don't hold ~6 GB forever.
     var modelIdleTTLSeconds = 3600
+
     /// `lms get` can stall and exit near the end; each retry resumes the `.part`.
     private static let maxDownloadAttempts = 10
+    /// How often a streamed progress line is forwarded to the UI (real `lms` output updates
+    /// many times a second; this keeps it from flooding the main actor).
+    private static let progressThrottle: TimeInterval = 0.25
+
+    /// Operation timeouts (seconds). Grouped so they're easy to find and tune.
+    private enum Timeouts {
+        static let serverStart: TimeInterval = 30
+        static let serverReady: TimeInterval = 20
+        static let runtimeInstall: TimeInterval = 1200
+        static let runtimeQuery: TimeInterval = 30
+        static let modelDownload: TimeInterval = 7200
+        static let modelLoad: TimeInterval = 600
+        static let modelLoadedWait: TimeInterval = 60
+    }
+
+    /// Poll / backoff intervals (nanoseconds).
+    private enum Delays {
+        static let processPoll: UInt64 = 200_000_000
+        static let conditionPoll: UInt64 = 500_000_000
+        static let presenceRetry: UInt64 = 1_000_000_000
+        static let downloadBackoff: UInt64 = 1_500_000_000
+    }
 
     /// Locates the `lms` CLI. A Finder-launched app inherits a minimal PATH that excludes
     /// `~/.lmstudio/bin` (where the installer puts it), so we probe explicit locations.
@@ -34,6 +58,8 @@ struct LMStudioManager {
         return candidates.first(where: isExecutable)
     }
 
+    // MARK: - Readiness
+
     /// Ensures `modelKey` is loaded and serving: starts the server if needed, downloads the
     /// model if (and only if) it's genuinely absent, then loads it. Idempotent and cheap
     /// when already loaded or downloaded. `onStatus` receives display-ready progress strings.
@@ -48,8 +74,8 @@ struct LMStudioManager {
 
         if await client.isServerReachable() == false {
             onStatus("Starting LM Studio…")
-            try await Self.run(cli, ["server", "start"], timeout: 30)
-            await Self.waitUntil(timeout: 20) { await client.isServerReachable() }
+            try await Self.runChecked(cli, ["server", "start"], timeout: Timeouts.serverStart)
+            await Self.waitUntil(timeout: Timeouts.serverReady) { await client.isServerReachable() }
         }
 
         // An MLX model can't load without the MLX runtime — and a fresh LM Studio has none,
@@ -70,7 +96,7 @@ struct LMStudioManager {
             throw LMStudioError.notRunning
         }
 
-        await Self.waitUntil(timeout: 60) { await client.presence(of: modelKey) == .loaded }
+        await Self.waitUntil(timeout: Timeouts.modelLoadedWait) { await client.presence(of: modelKey) == .loaded }
         guard await client.presence(of: modelKey) == .loaded else {
             throw LMStudioError.setupFailed("LM Studio couldn't load \(modelKey). Open LM Studio and load it manually, then Retry.")
         }
@@ -83,7 +109,7 @@ struct LMStudioManager {
         for attempt in 0..<3 {
             last = await client.presence(of: modelKey)
             if last != .serverUnreachable { return last }
-            if attempt < 2 { try? await Task.sleep(nanoseconds: 1_000_000_000) }
+            if attempt < 2 { try? await Task.sleep(nanoseconds: Delays.presenceRetry) }
         }
         return last
     }
@@ -96,6 +122,7 @@ struct LMStudioManager {
         client: LMStudioClient,
         onStatus: @escaping @Sendable (String) -> Void
     ) async throws {
+        let throttle = Throttle(Self.progressThrottle)
         var attempt = 0
         while true {
             // Stop the moment it's actually present — covers "finished on a prior attempt"
@@ -105,8 +132,8 @@ struct LMStudioManager {
             onStatus(attempt == 1 ? "Preparing to download the refinement model…"
                                   : "Resuming download (attempt \(attempt))…")
             do {
-                try await Self.runStreaming(cli, ["get", modelKey, "--mlx", "-y"], timeout: 7200) { line in
-                    if let status = Self.progressStatus(from: line, label: "Downloading refinement model") {
+                try await Self.runChecked(cli, ["get", modelKey, "--mlx", "-y"], timeout: Timeouts.modelDownload) { line in
+                    if throttle.allow(), let status = Self.progressStatus(from: line, label: "Downloading refinement model") {
                         onStatus(status)
                     }
                 }
@@ -118,19 +145,20 @@ struct LMStudioManager {
                     throw LMStudioError.setupFailed(
                         "The model download keeps timing out (\(attempt) attempts). Open LM Studio to finish it, then Retry. (\(error.localizedDescription))")
                 }
-                try? await Task.sleep(nanoseconds: 1_500_000_000) // brief backoff, then resume
+                try? await Task.sleep(nanoseconds: Delays.downloadBackoff) // brief backoff, then resume
             }
         }
     }
 
     private func loadModel(cli: String, modelKey: String, onStatus: @escaping @Sendable (String) -> Void) async throws {
         onStatus("Loading refinement model…")
-        try await Self.runStreaming(cli, [
+        let throttle = Throttle(Self.progressThrottle)
+        try await Self.runChecked(cli, [
             "load", modelKey, "-y",
             "--context-length", String(preferredContextLength),
             "--ttl", String(modelIdleTTLSeconds),
-        ], timeout: 600) { line in
-            if let status = Self.progressStatus(from: line, label: "Loading refinement model") {
+        ], timeout: Timeouts.modelLoad) { line in
+            if throttle.allow(), let status = Self.progressStatus(from: line, label: "Loading refinement model") {
                 onStatus(status)
             }
         }
@@ -144,10 +172,10 @@ struct LMStudioManager {
     private func ensureRuntime(cli: String, onStatus: @escaping @Sendable (String) -> Void) async throws {
         if await mlxRuntimeSelected(cli: cli) { return }
         onStatus("Installing the MLX runtime…")
-        let output = try await Self.capture(cli, ["runtime", "get", "mlx-llm", "-y"], timeout: 1200)
+        let output = try await Self.capture(cli, ["runtime", "get", "mlx-llm", "-y"], timeout: Timeouts.runtimeInstall)
         // `lms runtime get` downloads but does NOT activate; it prints the select command.
         if let name = Self.parseRuntimeSelectName(from: output) {
-            try? await Self.run(cli, ["runtime", "select", name], timeout: 30)
+            try? await Self.runChecked(cli, ["runtime", "select", name], timeout: Timeouts.runtimeQuery)
         }
         guard await mlxRuntimeSelected(cli: cli) else {
             throw LMStudioError.setupFailed(
@@ -156,7 +184,7 @@ struct LMStudioManager {
     }
 
     private func mlxRuntimeSelected(cli: String) async -> Bool {
-        guard let output = try? await Self.capture(cli, ["runtime", "ls"], timeout: 30) else { return false }
+        guard let output = try? await Self.capture(cli, ["runtime", "ls"], timeout: Timeouts.runtimeQuery) else { return false }
         return Self.stripControlCharacters(output)
             .split(whereSeparator: \.isNewline)
             .contains { $0.lowercased().contains("mlx") && $0.contains("✓") }
@@ -211,15 +239,17 @@ struct LMStudioManager {
 
     // MARK: - Process plumbing (nonisolated: runs off the main actor)
 
-    /// Runs `lms`, streaming each stdout/stderr line to `onLine` (for live progress) while
-    /// keeping a tail for error reporting. Polls so the call stays cancellable and can time
-    /// out; reading via a `readabilityHandler` means a chatty download can't deadlock a pipe.
-    nonisolated private static func runStreaming(
+    /// The one subprocess runner. Streams stdout+stderr to `onLine` (when given) for live
+    /// progress, always accumulating a bounded tail for diagnostics. Polls so the call is
+    /// cancellable and can time out; draining via a `readabilityHandler` means a chatty
+    /// command can't deadlock the pipe. Returns the exit status + captured output — callers
+    /// decide whether a nonzero status is an error.
+    nonisolated private static func runProcess(
         _ launchPath: String,
         _ args: [String],
         timeout: TimeInterval,
-        onLine: @escaping @Sendable (String) -> Void
-    ) async throws {
+        onLine: (@Sendable (String) -> Void)? = nil
+    ) async throws -> (status: Int32, output: String) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: launchPath)
         process.arguments = args
@@ -229,12 +259,13 @@ struct LMStudioManager {
         process.standardOutput = pipe
         process.standardError = pipe
         let handle = pipe.fileHandleForReading
-        let tail = TailBuffer()
+        let collected = OutputBuffer()
         handle.readabilityHandler = { fileHandle in
             let data = fileHandle.availableData
             guard !data.isEmpty else { return }
             let text = String(decoding: data, as: UTF8.self)
-            tail.append(text)
+            collected.append(text)
+            guard let onLine else { return }
             for piece in text.split(whereSeparator: { $0 == "\r" || $0 == "\n" }) {
                 let line = String(piece)
                 if !line.isEmpty { onLine(line) }
@@ -244,84 +275,41 @@ struct LMStudioManager {
         try process.run()
         defer { handle.readabilityHandler = nil }
 
-        let deadline = Date().addingTimeInterval(timeout)
+        let deadline = Deadline(seconds: timeout)
         while process.isRunning {
             if Task.isCancelled { process.terminate(); process.waitUntilExit(); throw CancellationError() }
-            if Date() > deadline {
+            if deadline.isExpired {
                 process.terminate(); process.waitUntilExit()
                 throw LMStudioError.setupFailed("lms \(args.first ?? "command") timed out.")
             }
-            try? await Task.sleep(nanoseconds: 200_000_000)
+            try? await Task.sleep(nanoseconds: Delays.processPoll)
         }
+        return (process.terminationStatus, collected.text)
+    }
 
-        guard process.terminationStatus == 0 else {
-            throw LMStudioError.setupFailed("lms \(args.first ?? "command"): \(tail.lastMeaningfulLine())")
+    /// Runs `lms` and throws if it exits nonzero (used for state-changing commands).
+    nonisolated private static func runChecked(
+        _ launchPath: String,
+        _ args: [String],
+        timeout: TimeInterval,
+        onLine: (@Sendable (String) -> Void)? = nil
+    ) async throws {
+        let result = try await runProcess(launchPath, args, timeout: timeout, onLine: onLine)
+        guard result.status == 0 else {
+            throw LMStudioError.setupFailed("lms \(args.first ?? "command"): \(lastMeaningfulLine(result.output))")
         }
     }
 
-    /// Runs `lms` without progress streaming (server start). Output → temp file (no pipe to
-    /// deadlock), read back only to explain a failure.
-    nonisolated private static func run(_ launchPath: String, _ args: [String], timeout: TimeInterval) async throws {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: launchPath)
-        process.arguments = args
-        process.environment = augmentedEnvironment()
-
-        let logURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("sapat-lms-\(args.first ?? "cmd")-\(UUID().uuidString).log")
-        FileManager.default.createFile(atPath: logURL.path, contents: nil)
-        let handle = try FileHandle(forWritingTo: logURL)
-        process.standardOutput = handle
-        process.standardError = handle
-        defer { try? FileManager.default.removeItem(at: logURL) }
-
-        try process.run()
-        let deadline = Date().addingTimeInterval(timeout)
-        while process.isRunning {
-            if Task.isCancelled { process.terminate(); process.waitUntilExit(); throw CancellationError() }
-            if Date() > deadline {
-                process.terminate(); process.waitUntilExit()
-                throw LMStudioError.setupFailed("lms \(args.first ?? "command") timed out.")
-            }
-            try? await Task.sleep(nanoseconds: 250_000_000)
-        }
-        try? handle.close()
-        guard process.terminationStatus == 0 else {
-            let output = (try? String(contentsOf: logURL, encoding: .utf8)) ?? ""
-            let detail = output.trimmingCharacters(in: .whitespacesAndNewlines)
-            throw LMStudioError.setupFailed(
-                "lms \(args.first ?? "command") failed" + (detail.isEmpty ? " (exit \(process.terminationStatus))." : ": \(detail)"))
-        }
-    }
-
-    /// Runs `lms` and returns its combined output (for parsing `runtime ls`/`get`). Output
-    /// goes to a temp file — no pipe to deadlock — and is returned regardless of exit code.
+    /// Runs `lms` and returns its output regardless of exit code (used for `runtime ls`/`get`).
     nonisolated private static func capture(_ launchPath: String, _ args: [String], timeout: TimeInterval) async throws -> String {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: launchPath)
-        process.arguments = args
-        process.environment = augmentedEnvironment()
+        try await runProcess(launchPath, args, timeout: timeout).output
+    }
 
-        let logURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("sapat-lms-\(args.first ?? "cmd")-\(UUID().uuidString).log")
-        FileManager.default.createFile(atPath: logURL.path, contents: nil)
-        let handle = try FileHandle(forWritingTo: logURL)
-        process.standardOutput = handle
-        process.standardError = handle
-        defer { try? FileManager.default.removeItem(at: logURL) }
-
-        try process.run()
-        let deadline = Date().addingTimeInterval(timeout)
-        while process.isRunning {
-            if Task.isCancelled { process.terminate(); process.waitUntilExit(); throw CancellationError() }
-            if Date() > deadline {
-                process.terminate(); process.waitUntilExit()
-                throw LMStudioError.setupFailed("lms \(args.first ?? "command") timed out.")
-            }
-            try? await Task.sleep(nanoseconds: 250_000_000)
-        }
-        try? handle.close()
-        return (try? String(contentsOf: logURL, encoding: .utf8)) ?? ""
+    private static func lastMeaningfulLine(_ output: String) -> String {
+        stripControlCharacters(output)
+            .split(whereSeparator: { $0 == "\n" || $0 == "\r" })
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .last(where: { !$0.isEmpty }) ?? "the command failed"
     }
 
     nonisolated private static func augmentedEnvironment() -> [String: String] {
@@ -333,32 +321,53 @@ struct LMStudioManager {
 
     /// Polls `condition` until true or the timeout elapses (best effort, no throw).
     nonisolated private static func waitUntil(timeout: TimeInterval, _ condition: @Sendable () async -> Bool) async {
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
+        let deadline = Deadline(seconds: timeout)
+        while !deadline.isExpired {
             if await condition() { return }
-            try? await Task.sleep(nanoseconds: 500_000_000)
+            try? await Task.sleep(nanoseconds: Delays.conditionPoll)
         }
     }
 }
 
-/// Thread-safe tail of a subprocess's output, for explaining a failure. The readability
-/// handler runs on a background queue, so access is locked.
-private final class TailBuffer: @unchecked Sendable {
+/// A timeout computed once, checked many times.
+private struct Deadline {
+    private let end: Date
+    init(seconds: TimeInterval) { end = Date().addingTimeInterval(seconds) }
+    var isExpired: Bool { Date() > end }
+}
+
+/// Rate-limits streamed progress to at most one update per `interval`. Safe to call from the
+/// pipe's background reader (lock-guarded).
+private final class Throttle: @unchecked Sendable {
     private let lock = NSLock()
-    private var text = ""
+    private let interval: TimeInterval
+    private var last = Date.distantPast
+
+    init(_ interval: TimeInterval) { self.interval = interval }
+
+    func allow() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        let now = Date()
+        guard now.timeIntervalSince(last) >= interval else { return false }
+        last = now
+        return true
+    }
+}
+
+/// Thread-safe, size-bounded accumulator for a subprocess's output. The readability handler
+/// runs on a background queue, so access is locked.
+private final class OutputBuffer: @unchecked Sendable {
+    private let lock = NSLock()
+    private var buffer = ""
 
     func append(_ chunk: String) {
         lock.lock(); defer { lock.unlock() }
-        text += chunk
-        if text.count > 4000 { text = String(text.suffix(4000)) }
+        buffer += chunk
+        if buffer.count > 4000 { buffer = String(buffer.suffix(4000)) }
     }
 
-    func lastMeaningfulLine() -> String {
+    var text: String {
         lock.lock(); defer { lock.unlock() }
-        let clean = LMStudioManager.stripControlCharacters(text)
-        let lines = clean.split(whereSeparator: { $0 == "\n" || $0 == "\r" })
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
-        return lines.last ?? "the command failed"
+        return buffer
     }
 }

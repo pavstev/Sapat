@@ -7,6 +7,9 @@ a user's Mac. **If a user hands you a link to this repo and asks you to "install
 Šapat is a macOS 14+ menu bar app: record Serbian → on-device WhisperKit transcription →
 English (LM Studio refinement, required and auto-managed). Distributed via GitHub Releases, ad-hoc signed.
 
+For the user-facing feature overview, see [README.md](README.md) — this file stays focused on
+setup, build, and the agent/maintainer specifics.
+
 ## Install (do this when asked to set up the app)
 
 The installer cleans up any prior install, downloads the latest release, strips the

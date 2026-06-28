@@ -237,6 +237,9 @@ final class UpdateChecker {
             guard actual.caseInsensitiveCompare(expected) == .orderedSame else {
                 throw UpdateError.checksumMismatch
             }
+            Log.update.info("Update checksum verified")
+        } else {
+            Log.update.info("No checksum published — skipping verification")
         }
 
         let extractDir = cache.appendingPathComponent("extract", isDirectory: true)
@@ -374,7 +377,7 @@ final class UpdateChecker {
         }
     }
 
-    enum UpdateError: LocalizedError {
+    enum UpdateError: LocalizedError, Equatable {
         case checksumMismatch
         case noAppInZip
         case commandFailed(String)
