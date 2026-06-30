@@ -112,6 +112,11 @@ final class HistoryStore {
             ?? FileManager.default.temporaryDirectory
         url = base.appendingPathComponent("history.json")
         load()
+        // Seed the semantic index from the durable JSON (idempotent backfill). JSON stays the
+        // record of truth — preserving the tolerant decode + failed-entry retry guarantees —
+        // while the index powers retrieval and search.
+        let snapshot = records.map(Self.indexFields)
+        Task { await MemoryStore.shared.backfill(snapshot) }
     }
 
     /// Insert a new record at the top, or replace an existing one in place (matched by `id`).
@@ -124,6 +129,10 @@ final class HistoryStore {
             records.insert(record, at: 0)
         }
         save()
+        let fields = Self.indexFields(record)
+        Task { await MemoryStore.shared.index(
+            id: fields.id, date: fields.date, serbian: fields.serbian,
+            artifact: fields.artifact, intent: "", mode: fields.mode) }
     }
 
     func delete(_ record: TranslationRecord) {
@@ -133,6 +142,12 @@ final class HistoryStore {
             try? FileManager.default.removeItem(at: dir.appendingPathComponent(name))
         }
         save()
+        let id = record.id.uuidString
+        Task { await MemoryStore.shared.remove(id: id) }
+    }
+
+    private static func indexFields(_ r: TranslationRecord) -> (id: String, date: Date, serbian: String, artifact: String, mode: String) {
+        (id: r.id.uuidString, date: r.date, serbian: r.serbian, artifact: r.english, mode: r.source)
     }
 
     /// Basenames of recordings that back a *failed* entry — held out of pruning so a retry

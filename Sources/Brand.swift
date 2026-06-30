@@ -41,6 +41,11 @@ enum Brand {
         try directory(in: .applicationSupportDirectory, subpath: "Models")
     }
 
+    /// `~/Library/Application Support/Sapat/memory.sqlite` — the local semantic-memory store.
+    static func memoryDatabaseURL() throws -> URL {
+        try applicationSupportDirectory().appendingPathComponent("memory.sqlite")
+    }
+
     /// Scratch WAV the recorder writes to before transcription.
     static var temporaryRecordingURL: URL {
         FileManager.default.temporaryDirectory

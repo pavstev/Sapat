@@ -16,10 +16,13 @@ import Foundation
 actor ThoughtPipeline {
     private let inference: Inference
     private let refiner: Refiner
+    /// Semantic memory for the Retrieve stage. Nil disables retrieval (e.g. in tests).
+    private let memory: MemoryStore?
 
-    init(inference: Inference) {
+    init(inference: Inference, memory: MemoryStore? = nil) {
         self.inference = inference
         self.refiner = Refiner(inference: inference)
+        self.memory = memory
     }
 
     struct Result: Sendable {
@@ -54,13 +57,19 @@ actor ThoughtPipeline {
             extraction = try await extract(cleaned)
         }
 
-        // 3. Retrieve — Phase 3 wires semantic memory in here.
+        // 3. Retrieve — pull the user's own related past notes from semantic memory.
+        var retrieved: [MemoryStore.Hit] = []
+        if let memory {
+            onProgress?("Recalling related notes…")
+            retrieved = await memory.search(query: cleaned, limit: 3)
+        }
+        let recall = Self.retrievedBlock(retrieved)
 
         // 4. Reason + 5. Self-critique.
         var analysis: String?
         if mode.runsReason {
             onProgress?("Reasoning through it…")
-            analysis = try await reason(cleaned: cleaned, extraction: extraction)
+            analysis = try await reason(cleaned: cleaned, extraction: extraction, recall: recall)
             if mode.runsCritique, let draft = analysis {
                 onProgress?("Checking for gaps & overclaims…")
                 analysis = try await critique(draft: draft, source: cleaned)
@@ -69,8 +78,26 @@ actor ThoughtPipeline {
 
         // 6. Synthesize.
         onProgress?("Writing the \(mode.label.lowercased())…")
-        let artifact = try await synthesize(mode: mode, cleaned: cleaned, extraction: extraction, analysis: analysis, glossary: glossary)
+        let artifact = try await synthesize(mode: mode, cleaned: cleaned, extraction: extraction, analysis: analysis, recall: recall, glossary: glossary)
         return Result(primary: artifact, cleaned: cleaned, extraction: extraction)
+    }
+
+    /// Renders retrieved memories as a clearly-fenced, optional context block. The prompts are
+    /// explicit that this is the user's prior context, to use only if relevant — never to invent
+    /// connections or import facts that weren't in the current input.
+    private static func retrievedBlock(_ hits: [MemoryStore.Hit]) -> String {
+        guard !hits.isEmpty else { return "" }
+        let items = hits.enumerated().map { index, hit -> String in
+            let text = hit.artifact.isEmpty ? hit.serbian : hit.artifact
+            return "\(index + 1). \(text)"
+        }.joined(separator: "\n")
+        return """
+
+
+        RELATED PAST NOTES FROM THIS USER (their own prior context — consider it only if directly \
+        relevant; do NOT import facts from it into the current output or invent connections):
+        \(items)
+        """
     }
 
     // MARK: - Stages
@@ -80,11 +107,12 @@ actor ThoughtPipeline {
         return try await inference.generateStructured(request, as: Extraction.self, schema: Extraction.schema)
     }
 
-    private func reason(cleaned: String, extraction: Extraction?) async throws -> String {
+    private func reason(cleaned: String, extraction: Extraction?, recall: String) async throws -> String {
         var user = "WHAT THE SPEAKER SAID (cleaned — the only ground truth):\n\(cleaned)"
         if let extraction, !extraction.isEmpty {
             user += "\n\nEXTRACTED STRUCTURE:\n\(extraction.promptText)"
         }
+        user += recall
         let raw = try await inference.generate(
             InferenceRequest(system: PipelinePrompts.reasoningSystem, user: user, temperature: 0.3))
         return OutputSanitizer.sanitize(raw)
@@ -98,7 +126,7 @@ actor ThoughtPipeline {
         return corrected.isEmpty ? draft : corrected
     }
 
-    private func synthesize(mode: OutputMode, cleaned: String, extraction: Extraction?, analysis: String?, glossary: String) async throws -> String {
+    private func synthesize(mode: OutputMode, cleaned: String, extraction: Extraction?, analysis: String?, recall: String, glossary: String) async throws -> String {
         let system = PipelinePrompts.synthesisSystem(instruction: mode.synthesisInstruction ?? "", glossary: glossary)
         var user = "WHAT THE SPEAKER SAID (cleaned — the only ground truth):\n\(cleaned)"
         if let extraction, !extraction.isEmpty {
@@ -107,6 +135,7 @@ actor ThoughtPipeline {
         if let analysis, !analysis.isEmpty {
             user += "\n\nANALYSIS (grounded reasoning to draw on):\n\(analysis)"
         }
+        user += recall
         let raw = try await inference.generate(
             InferenceRequest(system: system, user: user, temperature: 0.2))
         let text = OutputSanitizer.sanitize(raw)

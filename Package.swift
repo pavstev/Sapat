@@ -13,12 +13,16 @@ let package = Package(
     platforms: [.macOS(.v14)],
     dependencies: [
         .package(url: "https://github.com/argmaxinc/argmax-oss-swift", from: "1.0.0"),
+        // Local semantic-memory store. Macro-free (no Xcode plugin), links the system
+        // SQLite, and its SwiftPM package enables FTS5 — so it builds under the CLT.
+        .package(url: "https://github.com/groue/GRDB.swift", from: "7.0.0"),
     ],
     targets: [
         .executableTarget(
             name: "Sapat",
             dependencies: [
                 .product(name: "WhisperKit", package: "argmax-oss-swift"),
+                .product(name: "GRDB", package: "GRDB.swift"),
             ],
             path: "Sources"
         ),

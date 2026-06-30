@@ -86,7 +86,7 @@ final class RecorderViewModel {
     /// touches a caller — refinement goes through the `Inference` protocol and `Refiner`, so
     /// the orchestrator no longer hard-depends on LM Studio (F1).
     private let inference: any Inference = LMStudioInference()
-    @ObservationIgnored private lazy var pipeline = ThoughtPipeline(inference: inference)
+    @ObservationIgnored private lazy var pipeline = ThoughtPipeline(inference: inference, memory: .shared)
     /// Coalesces concurrent readiness work (the launch warm-up and a refine) so we never run
     /// two model downloads/loads at once.
     private var readinessTask: Task<Void, Error>?

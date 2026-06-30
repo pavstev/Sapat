@@ -60,4 +60,25 @@ final class ThoughtPipelineTests: XCTestCase {
         XCTAssertEqual(result.primary, "Drafted artifact.")
         XCTAssertEqual(mock.generateCallCount, 3, "Clean + Extract + Synthesize (no reason/critique)")
     }
+
+    func testRetrievedMemoryIsInjectedIntoThePrompt() async throws {
+        // Seed memory with a related past note, then run a repeat-topic recording and assert the
+        // note reaches the synthesis prompt (the mechanism behind "memory improves a repeat topic").
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("pipe-mem-\(UUID().uuidString).sqlite")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let memory = MemoryStore(path: tmp)
+        await memory.index(
+            id: "past", date: Date(), serbian: "",
+            artifact: "We decided to use an idempotent webhook handler for the retry queue.",
+            intent: "retry queue design", mode: "engineering-report")
+
+        let mock = mock()
+        let pipeline = ThoughtPipeline(inference: mock, memory: memory)
+        _ = try await pipeline.run(transcript: "again about the retry queue and the idempotent handler", mode: OutputModes.structuredBrief)
+
+        let injected = mock.requests.contains { request in
+            request.messages.contains { $0.content.contains("idempotent webhook handler") }
+        }
+        XCTAssertTrue(injected, "the retrieved past note should be injected into a downstream prompt")
+    }
 }
