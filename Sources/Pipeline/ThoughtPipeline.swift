@@ -108,11 +108,7 @@ actor ThoughtPipeline {
     }
 
     private func reason(cleaned: String, extraction: Extraction?, recall: String) async throws -> String {
-        var user = "WHAT THE SPEAKER SAID (cleaned — the only ground truth):\n\(cleaned)"
-        if let extraction, !extraction.isEmpty {
-            user += "\n\nEXTRACTED STRUCTURE:\n\(extraction.promptText)"
-        }
-        user += recall
+        let user = PromptFragments.groundedMessage(cleaned: cleaned, extraction: extraction, analysis: nil, recall: recall)
         let raw = try await inference.generate(
             InferenceRequest(system: PipelinePrompts.reasoningSystem, user: user, temperature: 0.3))
         return OutputSanitizer.sanitize(raw)
@@ -128,19 +124,10 @@ actor ThoughtPipeline {
 
     private func synthesize(mode: OutputMode, cleaned: String, extraction: Extraction?, analysis: String?, recall: String, glossary: String) async throws -> String {
         let system = PipelinePrompts.synthesisSystem(instruction: mode.synthesisInstruction ?? "", glossary: glossary)
-        var user = "WHAT THE SPEAKER SAID (cleaned — the only ground truth):\n\(cleaned)"
-        if let extraction, !extraction.isEmpty {
-            user += "\n\nEXTRACTED STRUCTURE:\n\(extraction.promptText)"
-        }
-        if let analysis, !analysis.isEmpty {
-            user += "\n\nANALYSIS (grounded reasoning to draw on):\n\(analysis)"
-        }
-        user += recall
+        let user = PromptFragments.groundedMessage(cleaned: cleaned, extraction: extraction, analysis: analysis, recall: recall)
         let raw = try await inference.generate(
             InferenceRequest(system: system, user: user, temperature: 0.2))
-        let text = OutputSanitizer.sanitize(raw)
-        guard !text.isEmpty else { throw InferenceError.emptyOutput }
-        return text
+        return try OutputSanitizer.sanitizedNonEmpty(raw)
     }
 }
 
@@ -178,8 +165,7 @@ enum PipelinePrompts {
     """
 
     static func synthesisSystem(instruction: String, glossary: String) -> String {
-        let terms = glossary.trimmingCharacters(in: .whitespacesAndNewlines)
-        let glossaryBlock = terms.isEmpty ? "" : "\n\nApply this glossary for specific names/terms:\n\(terms)"
+        let glossaryBlock = PromptFragments.glossaryBlock(glossary)
         return """
         You produce a final artifact from what a software developer said while thinking out loud. \
         The input below is the only ground truth.

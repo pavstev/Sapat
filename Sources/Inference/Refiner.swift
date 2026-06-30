@@ -93,9 +93,7 @@ actor Refiner {
         let maxTokens = max(128, Int(Double(context) * contextSafety) - promptTokens)
         let raw = try await inference.generate(
             InferenceRequest(system: system, user: user, temperature: temperature, maxTokens: maxTokens))
-        let text = OutputSanitizer.sanitize(raw)
-        guard !text.isEmpty else { throw InferenceError.emptyOutput }
-        return text
+        return try OutputSanitizer.sanitizedNonEmpty(raw)
     }
 
     /// Stitches the per-chunk refinements into one statement, de-duping ideas that span chunk
@@ -158,8 +156,7 @@ actor Refiner {
     }
 
     private func mergeSystemPrompt(language: RefineLanguage, register: String, glossary: String) -> String {
-        let terms = glossary.trimmingCharacters(in: .whitespacesAndNewlines)
-        let glossaryBlock = terms.isEmpty ? "" : "\n\nApply this glossary for specific names/terms:\n\(terms)"
+        let glossaryBlock = PromptFragments.glossaryBlock(glossary)
         let languageLine = language == .english
             ? "into a single clean, precise English statement."
             : "into a single clean, precise Serbian statement (the speaker's own language — do NOT translate to English)."
@@ -186,13 +183,9 @@ actor Refiner {
     }
 
     private static func fill(_ template: String, register: String, glossary: String) -> String {
-        let terms = glossary.trimmingCharacters(in: .whitespacesAndNewlines)
-        let glossaryBlock = terms.isEmpty
-            ? ""
-            : "\n\nApply this glossary for specific names/terms:\n\(terms)"
         return template
             .replacingOccurrences(of: "{TONE_INSTRUCTION}", with: register)
-            .replacingOccurrences(of: "{GLOSSARY_BLOCK}", with: glossaryBlock)
+            .replacingOccurrences(of: "{GLOSSARY_BLOCK}", with: PromptFragments.glossaryBlock(glossary))
     }
 
     /// English-output template — **verbatim** from the original single-pass refiner, so

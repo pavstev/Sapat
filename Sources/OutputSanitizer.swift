@@ -14,10 +14,18 @@ import Foundation
 ///   survives) are acceptable; false positives (eating real content) are not.
 /// - IDEMPOTENT: `sanitize(sanitize(x)) == sanitize(x)`. It loops the
 ///   wrapper-stripping passes until nothing more peels off.
-/// - Intended call site: `LMStudioClient.translate`, applied to the model's reply
-///   before the empty-check. Do NOT apply it to the Whisper fallback path —
+/// - Intended call site: the refiner / pipeline stages, applied to a model reply before the
+///   empty-check (see `sanitizedNonEmpty`). Do NOT apply it to the Whisper transcript —
 ///   Whisper never emits LM scaffolding.
 enum OutputSanitizer {
+
+    /// Sanitize and require usable output — the common refine/synthesize contract. Throws
+    /// `InferenceError.emptyOutput` when nothing survives sanitization.
+    static func sanitizedNonEmpty(_ raw: String) throws -> String {
+        let text = sanitize(raw)
+        guard !text.isEmpty else { throw InferenceError.emptyOutput }
+        return text
+    }
 
     static func sanitize(_ raw: String) -> String {
         var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
