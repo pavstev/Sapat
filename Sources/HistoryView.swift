@@ -29,7 +29,8 @@ struct HistoryView: View {
                                 onToggle: { toggle(item) },
                                 onCopy: { copy(item.english) },
                                 onDelete: { delete(item) },
-                                onRetry: { onRetry(item) }
+                                onRetry: { onRetry(item) },
+                                onTogglePin: { withAnimation(.snappy) { store.togglePin(item) } }
                             )
                         }
                     }
@@ -128,6 +129,7 @@ private struct HistoryRow: View {
     let onCopy: () -> Void
     let onDelete: () -> Void
     let onRetry: () -> Void
+    let onTogglePin: () -> Void
 
     @State private var justCopied = false
 
@@ -234,6 +236,7 @@ private struct HistoryRow: View {
                 .buttonStyle(.plain)
                 .help("Copy English")
 
+                pinButton
                 deleteButton
             }
         }
@@ -273,6 +276,7 @@ private struct HistoryRow: View {
                     .buttonStyle(.plain)
                     .help("Re-run this recording")
                 }
+                pinButton
                 deleteButton
             }
         }
@@ -308,6 +312,18 @@ private struct HistoryRow: View {
         }
         .buttonStyle(.plain)
         .help("Delete")
+        .accessibilityLabel("Delete")
+    }
+
+    private var pinButton: some View {
+        Button(action: onTogglePin) {
+            Image(systemName: item.pinned ? "pin.fill" : "pin")
+                .font(.system(size: 11))
+                .foregroundStyle(item.pinned ? Theme.copper : Theme.textTertiary)
+        }
+        .buttonStyle(.plain)
+        .help(item.pinned ? "Unpin" : "Pin to top")
+        .accessibilityLabel(item.pinned ? "Unpin" : "Pin to top")
     }
 
     /// `source-icon · relative-date` (compact) or absolute timestamp (expanded), with a
@@ -322,6 +338,9 @@ private struct HistoryRow: View {
                  : item.date.formatted(.dateTime.month().day().hour().minute()))
                 .font(.system(size: 11))
                 .foregroundStyle(Theme.textTertiary)
+            if item.pinned {
+                Image(systemName: "pin.fill").font(.system(size: 9)).foregroundStyle(Theme.copper)
+            }
             if isFailed {
                 Text("Failed")
                     .font(.system(size: 10, weight: .semibold))

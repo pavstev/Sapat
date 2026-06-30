@@ -70,6 +70,19 @@ final class TranslationRecordTests: XCTestCase {
         XCTAssertEqual(decoded.audioURL?.lastPathComponent, "rec-20260628-120000-abc123.wav")
     }
 
+    /// The `pinned` flag is migration-safe: pre-pin history decodes as not pinned, and a set
+    /// flag round-trips.
+    func testPinnedIsMigrationSafe() throws {
+        let legacy = """
+        {"id":"F1E2D3C4-0000-0000-0000-000000000002","date":760000000,"serbian":"","english":"x","model":"m","source":"mlx"}
+        """.data(using: .utf8)!
+        XCTAssertFalse(try decoder.decode(TranslationRecord.self, from: legacy).pinned)
+
+        let pinned = TranslationRecord(date: Date(timeIntervalSince1970: 1), serbian: "", english: "x",
+                                       model: "m", source: .mlx, pinned: true)
+        XCTAssertTrue(try decoder.decode(TranslationRecord.self, from: encoder.encode(pinned)).pinned)
+    }
+
     /// An imported entry resolves its audio straight from the stored absolute path (we point
     /// at the user's own file rather than copying it).
     func testImportedRecordResolvesAudioPath() {

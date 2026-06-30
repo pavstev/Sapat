@@ -28,6 +28,8 @@ struct TranslationRecord: Codable, Identifiable, Equatable {
     let importedPath: String?
     /// Display name for an imported recording.
     let importedFileName: String?
+    /// Whether the user pinned this entry — sorted to the top. Migration-safe (defaults false).
+    var pinned: Bool
 
     init(
         id: UUID = UUID(),
@@ -40,7 +42,8 @@ struct TranslationRecord: Codable, Identifiable, Equatable {
         errorMessage: String? = nil,
         audioFileName: String? = nil,
         importedPath: String? = nil,
-        importedFileName: String? = nil
+        importedFileName: String? = nil,
+        pinned: Bool = false
     ) {
         self.id = id
         self.date = date
@@ -53,11 +56,12 @@ struct TranslationRecord: Codable, Identifiable, Equatable {
         self.audioFileName = audioFileName
         self.importedPath = importedPath
         self.importedFileName = importedFileName
+        self.pinned = pinned
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, date, serbian, english, model, source
-        case status, errorMessage, audioFileName, importedPath, importedFileName
+        case status, errorMessage, audioFileName, importedPath, importedFileName, pinned
     }
 
     /// Tolerant decode: records written before the failure-tracking fields existed carry only
@@ -75,6 +79,7 @@ struct TranslationRecord: Codable, Identifiable, Equatable {
         audioFileName = try c.decodeIfPresent(String.self, forKey: .audioFileName)
         importedPath = try c.decodeIfPresent(String.self, forKey: .importedPath)
         importedFileName = try c.decodeIfPresent(String.self, forKey: .importedFileName)
+        pinned = (try? c.decode(Bool.self, forKey: .pinned)) ?? false
     }
 
     var isFailed: Bool { status == .failed }
@@ -128,6 +133,7 @@ final class HistoryStore {
         } else {
             records.insert(record, at: 0)
         }
+        sortRecords()
         save()
         let fields = Self.indexFields(record)
         Task { await MemoryStore.shared.index(
@@ -156,10 +162,25 @@ final class HistoryStore {
         Set(records.compactMap { $0.isFailed ? $0.audioFileName : nil })
     }
 
+    /// Pin/unpin an entry and re-sort (pinned to the top). Pin is a UI/ordering concept, not a
+    /// retrieval signal, so the memory index is untouched.
+    func togglePin(_ record: TranslationRecord) {
+        guard let index = records.firstIndex(where: { $0.id == record.id }) else { return }
+        records[index].pinned.toggle()
+        sortRecords()
+        save()
+    }
+
+    /// Pinned entries first, then newest-first within each group.
+    private func sortRecords() {
+        records.sort { lhs, rhs in lhs.pinned != rhs.pinned ? lhs.pinned : lhs.date > rhs.date }
+    }
+
     private func load() {
         guard let data = try? Data(contentsOf: url),
               let decoded = try? JSONDecoder().decode([TranslationRecord].self, from: data) else { return }
-        records = decoded.sorted { $0.date > $1.date }
+        records = decoded
+        sortRecords()
     }
 
     private func save() {

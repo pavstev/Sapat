@@ -16,6 +16,7 @@ struct PopoverView: View {
 
     @State private var tab: Tab = .record
     @State private var showingImporter = false
+    @State private var showingExporter = false
     @State private var isDropTargeted = false
     private enum Tab: Hashable { case record, history }
 
@@ -108,6 +109,7 @@ struct PopoverView: View {
     private var recordContent: some View {
         VStack(spacing: Theme.s4) {
             OutputModePicker()
+            GlossaryEditor()
             recordButton
             statusLine
             if let detail = vm.processingDetail { processingDetailView(detail) }
@@ -334,6 +336,18 @@ struct PopoverView: View {
                 .overlay(alignment: .top) { Rectangle().fill(Theme.hairline).frame(height: 0.5) }
         }
         .cardSurface()
+        .fileExporter(
+            isPresented: $showingExporter,
+            document: MarkdownDocument(exportMarkdown),
+            contentType: UTType(filenameExtension: "md") ?? .plainText,
+            defaultFilename: ArtifactExport.suggestedFilename(title: vm.resultMode.label)
+        ) { _ in }
+    }
+
+    /// The Markdown document shared / saved from the result card.
+    private var exportMarkdown: String {
+        ArtifactExport.markdown(artifact: vm.outputText, serbian: vm.serbianText,
+                                title: vm.resultMode.label, source: vm.translationSource?.label)
     }
 
     // MARK: Live streaming result (while .translating, before the committed result lands)
@@ -421,6 +435,20 @@ struct PopoverView: View {
                     .help("Informed by \(vm.resultRetrievedCount) of your past notes")
             }
             Spacer(minLength: 0)
+            ShareLink(item: exportMarkdown) {
+                Image(systemName: "square.and.arrow.up").font(.system(size: 13))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(Theme.copperLight)
+            .help("Share")
+            .accessibilityLabel("Share")
+            Button { showingExporter = true } label: {
+                Image(systemName: "arrow.down.doc").font(.system(size: 13))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(Theme.copperLight)
+            .help("Save as Markdown")
+            .accessibilityLabel("Save as Markdown")
             Button { vm.copyOutput() } label: {
                 Label("Copy", systemImage: "doc.on.doc")
                     .font(.system(size: 12, weight: .medium))
