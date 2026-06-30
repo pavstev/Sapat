@@ -11,6 +11,8 @@ final class MockInference: Inference, @unchecked Sendable {
     private let contextWindowValue: Int
     private let responder: @Sendable (InferenceRequest, Int) -> String
 
+    let source: TranslationSource = .mlx
+
     init(contextWindow: Int = 8192, responder: @escaping @Sendable (InferenceRequest, Int) -> String) {
         self.contextWindowValue = contextWindow
         self.responder = responder

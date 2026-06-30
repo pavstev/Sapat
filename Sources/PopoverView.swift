@@ -343,8 +343,8 @@ struct PopoverView: View {
                     .labelStyle(.titleAndIcon)
                     .lineLimit(1)
                     .truncationMode(.middle)
-            } else if vm.translationSource == .lmStudio {
-                Label("refined by LM Studio", systemImage: "sparkles")
+            } else if let src = vm.translationSource {
+                Label("refined · \(src.label)", systemImage: src.icon)
                     .font(.caption2)
                     .foregroundStyle(Theme.textTertiary)
                     .labelStyle(.titleAndIcon)

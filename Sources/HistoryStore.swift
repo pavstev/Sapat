@@ -17,7 +17,7 @@ struct TranslationRecord: Codable, Identifiable, Equatable {
     let serbian: String
     let english: String
     let model: String
-    let source: String // "LM Studio" or "Whisper"
+    let source: TranslationSource
     let status: RecordStatus
     /// Why a failed job failed (user-facing); nil for completed entries.
     let errorMessage: String?
@@ -35,7 +35,7 @@ struct TranslationRecord: Codable, Identifiable, Equatable {
         serbian: String,
         english: String,
         model: String,
-        source: String,
+        source: TranslationSource,
         status: RecordStatus = .completed,
         errorMessage: String? = nil,
         audioFileName: String? = nil,
@@ -69,7 +69,7 @@ struct TranslationRecord: Codable, Identifiable, Equatable {
         serbian = try c.decodeIfPresent(String.self, forKey: .serbian) ?? ""
         english = try c.decodeIfPresent(String.self, forKey: .english) ?? ""
         model = try c.decodeIfPresent(String.self, forKey: .model) ?? ""
-        source = try c.decodeIfPresent(String.self, forKey: .source) ?? "LM Studio"
+        source = TranslationSource(persisted: try c.decodeIfPresent(String.self, forKey: .source) ?? "")
         status = try c.decodeIfPresent(RecordStatus.self, forKey: .status) ?? .completed
         errorMessage = try c.decodeIfPresent(String.self, forKey: .errorMessage)
         audioFileName = try c.decodeIfPresent(String.self, forKey: .audioFileName)
@@ -147,7 +147,7 @@ final class HistoryStore {
     }
 
     private static func indexFields(_ r: TranslationRecord) -> (id: String, date: Date, serbian: String, artifact: String, mode: String) {
-        (id: r.id.uuidString, date: r.date, serbian: r.serbian, artifact: r.english, mode: r.source)
+        (id: r.id.uuidString, date: r.date, serbian: r.serbian, artifact: r.english, mode: r.source.rawValue)
     }
 
     /// Basenames of recordings that back a *failed* entry — held out of pruning so a retry

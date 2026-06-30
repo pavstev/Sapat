@@ -30,6 +30,9 @@ protocol Inference: Sendable {
 
     /// The loaded model's usable context window, in tokens. Sizes chunking in `Refiner`.
     var contextWindow: Int { get async }
+
+    /// Which engine this is — for provenance labelling in the UI and history.
+    var source: TranslationSource { get }
 }
 
 extension Inference {

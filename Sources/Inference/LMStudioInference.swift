@@ -7,6 +7,8 @@ import Foundation
 /// inside this file and its two helpers (`LMStudioManager`, `LMStudioClient`), so nothing
 /// above the `Inference` protocol depends on LM Studio.
 struct LMStudioInference: Inference {
+    let source: TranslationSource = .lmStudio
+
     private let client: LMStudioClient
     private let manager: LMStudioManager
     private let modelKey: String

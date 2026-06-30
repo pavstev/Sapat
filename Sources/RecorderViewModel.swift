@@ -467,7 +467,7 @@ final class RecorderViewModel {
             return
         }
         englishText = cleaned
-        translationSource = .lmStudio
+        translationSource = inference.source
         processingDetail = nil
         copyToPasteboard(cleaned)
         flashCopied()
@@ -494,7 +494,7 @@ final class RecorderViewModel {
             serbian: serbian,
             english: english,
             model: whisperModel,
-            source: "LM Studio",
+            source: inference.source,
             status: status,
             errorMessage: error,
             audioFileName: audio.audioFileName,

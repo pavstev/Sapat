@@ -29,6 +29,24 @@ final class TranslationRecordTests: XCTestCase {
         XCTAssertNil(record.audioFileName)
         XCTAssertNil(record.audioURL)
         XCTAssertEqual(record.english, "Hello")
+        XCTAssertEqual(record.source, .lmStudio, "legacy \"LM Studio\" string maps to the enum case")
+    }
+
+    /// Provenance is now a typed enum, persisted by rawValue, with a legacy mapper for the
+    /// pre-2.0 free-form strings. Both must round-trip / map correctly.
+    func testSourceEnumPersistenceAndLegacyMapping() throws {
+        // New records round-trip by rawValue.
+        for source: TranslationSource in [.mlx, .lmStudio, .cloud, .whisper] {
+            let record = TranslationRecord(date: Date(timeIntervalSince1970: 1), serbian: "", english: "x",
+                                           model: "m", source: source)
+            XCTAssertEqual(try decoder.decode(TranslationRecord.self, from: encoder.encode(record)).source, source)
+        }
+        // Legacy free-form strings map to cases.
+        XCTAssertEqual(TranslationSource(persisted: "LM Studio"), .lmStudio)
+        XCTAssertEqual(TranslationSource(persisted: "Whisper"), .whisper)
+        XCTAssertEqual(TranslationSource(persisted: "mlx"), .mlx)
+        XCTAssertEqual(TranslationSource(persisted: ""), .lmStudio)
+        XCTAssertEqual(TranslationSource(persisted: "garbage"), .lmStudio)
     }
 
     /// A failed entry's status, error, and recording link must survive a save/load cycle so
@@ -39,7 +57,7 @@ final class TranslationRecordTests: XCTestCase {
             serbian: "Текст",
             english: "",
             model: "openai_whisper-large-v3",
-            source: "LM Studio",
+            source: .lmStudio,
             status: .failed,
             errorMessage: "LM Studio isn't running.",
             audioFileName: "rec-20260628-120000-abc123.wav"
@@ -61,7 +79,7 @@ final class TranslationRecordTests: XCTestCase {
             serbian: "",
             english: "",
             model: "openai_whisper-large-v3",
-            source: "LM Studio",
+            source: .lmStudio,
             status: .failed,
             importedPath: path,
             importedFileName: "meeting.m4a"

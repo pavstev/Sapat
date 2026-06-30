@@ -23,6 +23,8 @@ actor MLXInference: Inference {
     /// Default reasoner: a small, strong, Apache-2.0 quantized chat model (3–4B class).
     static let defaultModelID = "mlx-community/Qwen3-4B-4bit"
 
+    nonisolated let source: TranslationSource = .mlx
+
     private let modelID: String
     private let maxContext: Int
     private var container: ModelContainer?

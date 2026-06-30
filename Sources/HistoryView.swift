@@ -135,7 +135,7 @@ private struct HistoryRow: View {
 
     private var sourceIcon: String {
         if isFailed { return "exclamationmark.triangle.fill" }
-        return item.source == "LM Studio" ? "sparkles" : "waveform"
+        return item.source.icon
     }
 
     /// The collapsed one-liner: the result for a success, else whatever we salvaged.
