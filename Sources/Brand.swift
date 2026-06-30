@@ -34,6 +34,13 @@ enum Brand {
         try directory(in: .applicationSupportDirectory, subpath: "Recordings")
     }
 
+    /// `~/Library/Application Support/Sapat/Models` — self-managed model weights live here,
+    /// deliberately **outside** `Sapat.app`, so the in-place updater's bundle swap never wipes
+    /// them and a multi-GB model is downloaded once and reused across every app update.
+    static func modelsDirectory() throws -> URL {
+        try directory(in: .applicationSupportDirectory, subpath: "Models")
+    }
+
     /// Scratch WAV the recorder writes to before transcription.
     static var temporaryRecordingURL: URL {
         FileManager.default.temporaryDirectory

@@ -79,10 +79,14 @@ final class RecorderViewModel {
 
     // MARK: Dependencies
     private let whisper = WhisperEngine()
-    private var llm = LMStudioClient()
-    private let lmStudio = LMStudioManager()
-    /// Coalesces concurrent readiness work (the launch warm-up and a refine) so we never
-    /// run two `lms` downloads/loads at once.
+    /// The active inference backend. The interim default is LM Studio; the in-process MLX
+    /// engine becomes the default once the build moves to `xcodebuild`. Swapping this never
+    /// touches a caller — refinement goes through the `Inference` protocol and `Refiner`, so
+    /// the orchestrator no longer hard-depends on LM Studio (F1).
+    private let inference: any Inference = LMStudioInference()
+    @ObservationIgnored private lazy var refiner = Refiner(inference: inference)
+    /// Coalesces concurrent readiness work (the launch warm-up and a refine) so we never run
+    /// two model downloads/loads at once.
     private var readinessTask: Task<Void, Error>?
 
     /// Translation history store; set by AppDelegate.
@@ -132,7 +136,7 @@ final class RecorderViewModel {
                 Task { @MainActor in self?.setPreparingProgress(fraction) }
             }
             setState(.idle)
-            warmUpLMStudio()
+            warmUpInference()
             pruneOldRecordings(keeping: 30)
         } catch {
             setState(.error(AppError(
@@ -142,16 +146,16 @@ final class RecorderViewModel {
         }
     }
 
-    /// Best-effort, non-blocking: at launch we get LM Studio fully ready (server up, model
-    /// downloaded + loaded) so the first refinement is instant. Failures here are silent —
-    /// the refine path runs the same readiness check and surfaces a real error only if a
-    /// recording actually needs LM Studio and it still can't be made ready.
-    private func warmUpLMStudio() {
+    /// Best-effort, non-blocking: at launch we get the inference engine fully ready (model
+    /// loaded / server up) so the first refinement is instant. Failures here are silent — the
+    /// refine path runs the same readiness check and surfaces a real error only if a recording
+    /// actually needs the engine and it still can't be made ready.
+    private func warmUpInference() {
         Task { [weak self] in
             do {
-                try await self?.ensureLMStudioReady()
+                try await self?.ensureInferenceReady()
             } catch {
-                Log.llm.info("LM Studio warm-up deferred: \(error.localizedDescription, privacy: .public)")
+                Log.llm.info("Inference warm-up deferred: \(error.localizedDescription, privacy: .public)")
                 self?.setLMStudioStatus(nil)
             }
         }
@@ -392,8 +396,8 @@ final class RecorderViewModel {
         setState(.translating)
         processingDetail = nil
         do {
-            try await ensureLMStudioReady()
-            let english = try await llm.refine(
+            try await ensureInferenceReady()
+            let english = try await refiner.refine(
                 serbianText,
                 tone: TranslationPreferences.tone,
                 glossary: TranslationPreferences.glossary,
@@ -420,15 +424,14 @@ final class RecorderViewModel {
     /// launch warm-up so two `lms` downloads/loads never run at once. The off-main readiness
     /// work reports progress through an `AsyncStream` (it can't touch main-actor state
     /// directly), which we drain here to update `lmStudioStatus`.
-    private func ensureLMStudioReady() async throws {
-        llm.model = TranslationPreferences.model
+    private func ensureInferenceReady() async throws {
         if let existing = readinessTask {
             try await existing.value
             return
         }
-        // Coalesce concurrent callers (the launch warm-up + a refine) onto one readiness run
-        // so two `lms` downloads/loads never run at once. The task inherits this main actor,
-        // so the progress callback can update state directly; the manager throttles it.
+        // Coalesce concurrent callers (the launch warm-up + a refine) onto one readiness run so
+        // two model downloads/loads never run at once. The task inherits this main actor, so the
+        // progress callback can update state directly; the backend throttles it.
         let task = Task { try await self.performReadiness() }
         readinessTask = task
         defer { readinessTask = nil }
@@ -437,7 +440,7 @@ final class RecorderViewModel {
 
     private func performReadiness() async throws {
         defer { setLMStudioStatus(nil) }
-        try await lmStudio.ensureReady(modelKey: TranslationPreferences.model, client: llm) { [weak self] status in
+        try await inference.prepare { [weak self] status in
             Task { @MainActor in self?.setLMStudioStatus(status) }
         }
     }
