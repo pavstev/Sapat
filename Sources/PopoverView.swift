@@ -10,6 +10,7 @@ import UniformTypeIdentifiers
 struct PopoverView: View {
     @Environment(RecorderViewModel.self) private var vm
     @Environment(UpdateChecker.self) private var updater
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let resultMaxHeight: CGFloat = 220
 
@@ -110,6 +111,9 @@ struct PopoverView: View {
             recordButton
             statusLine
             if let detail = vm.processingDetail { processingDetailView(detail) }
+            if vm.isBusy, vm.plannedStages.count > 1 {
+                StageStrip(stages: vm.plannedStages, current: vm.liveStage)
+            }
             if vm.canImport { importButton }
             preparingProgress
             if let status = vm.engineStatus { engineStatusView(status) }
@@ -158,9 +162,10 @@ struct PopoverView: View {
                 Circle()
                     .stroke(buttonColor.opacity(0.4), lineWidth: 3)
                     .frame(width: 96, height: 96)
-                    .scaleEffect(vm.isRecording ? 1 + vm.level * 0.35 : 1)
+                    // The level-driven pulse is decorative — disable it under Reduce Motion.
+                    .scaleEffect(vm.isRecording && !reduceMotion ? 1 + vm.level * 0.35 : 1)
                     .opacity(vm.isRecording ? 1 : 0)
-                    .animation(.easeOut(duration: 0.1), value: vm.level)
+                    .animation(reduceMotion ? nil : .easeOut(duration: 0.1), value: vm.level)
                 Circle()
                     .fill(buttonColor)
                     .frame(width: 72, height: 72)
@@ -180,6 +185,19 @@ struct PopoverView: View {
         .disabled(!vm.canRecord)
         .opacity(vm.canRecord ? 1 : 0.55)
         .padding(.top, Theme.s2)
+        .accessibilityLabel(recordButtonLabel)
+        .accessibilityHint(vm.isRecording ? "Stops recording and transcribes" : "Starts recording")
+        .accessibilityAddTraits(.isButton)
+    }
+
+    private var recordButtonLabel: String {
+        switch vm.state {
+        case .recording: return "Recording, \(recordingClock(vm.recordingDuration))"
+        case .transcribing: return "Transcribing"
+        case .translating: return "Refining"
+        case .preparing: return "Preparing"
+        case .idle, .done, .error: return "Record"
+        }
     }
 
     private var buttonColor: Color { vm.isRecording ? Theme.recording : Theme.copper }
@@ -303,10 +321,7 @@ struct PopoverView: View {
                                  font: .system(size: 13),
                                  color: Theme.textSecondary)
                     Rectangle().fill(Theme.hairline).frame(width: 1)
-                    resultColumn(title: vm.resultTitle,
-                                 text: vm.outputText,
-                                 font: .system(size: 14),
-                                 color: Theme.textPrimary)
+                    artifactColumn(title: vm.resultTitle, text: vm.outputText, kind: vm.resultMode.renderKind)
                 }
                 .padding(Theme.s3)
                 .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -361,6 +376,25 @@ struct PopoverView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(title)
+        .accessibilityValue(text)
+    }
+
+    /// The produced-artifact column — rendered per the producing mode's `renderKind` (Markdown
+    /// for report/brief, formatted for standup/prompt, plain for Polished English/Serbian).
+    private func artifactColumn(title: String, text: String, kind: ArtifactRenderKind) -> some View {
+        VStack(alignment: .leading, spacing: Theme.s1 + 2) {
+            Text(title)
+                .font(.system(size: 10, weight: .semibold))
+                .tracking(0.6)
+                .foregroundStyle(Theme.textTertiary)
+            ArtifactView(text: text, kind: kind)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(title)
+        .accessibilityValue(text)
     }
 
     private var copyBar: some View {
@@ -377,6 +411,14 @@ struct PopoverView: View {
                     .font(.caption2)
                     .foregroundStyle(Theme.textTertiary)
                     .labelStyle(.titleAndIcon)
+            }
+            if vm.resultRetrievedCount > 0 {
+                Label("· \(vm.resultRetrievedCount) note\(vm.resultRetrievedCount == 1 ? "" : "s")",
+                      systemImage: "brain")
+                    .font(.caption2)
+                    .foregroundStyle(Theme.textTertiary)
+                    .labelStyle(.titleAndIcon)
+                    .help("Informed by \(vm.resultRetrievedCount) of your past notes")
             }
             Spacer(minLength: 0)
             Button { vm.copyOutput() } label: {

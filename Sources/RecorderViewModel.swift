@@ -34,6 +34,14 @@ final class RecorderViewModel {
     private(set) var streamingText = ""
     /// Column title for the produced artifact in the result card (varies by Output Mode).
     private(set) var resultTitle: String = OutputModes.default.resultTitle
+    /// The pipeline stage currently running — drives the live stage strip; nil when idle.
+    private(set) var liveStage: PipelineStage?
+    /// The stages the active mode will run, for the strip.
+    private(set) var plannedStages: [PipelineStage] = []
+    /// The mode that produced the displayed result (rendering uses this, not the live picker).
+    private(set) var resultMode: OutputMode = OutputModes.default
+    /// How many past notes informed the result (for the "informed by N notes" affordance).
+    private(set) var resultRetrievedCount = 0
     private(set) var translationSource: TranslationSource?
     private(set) var notice: String? // transient info, e.g. "No speech detected"
     /// Non-nil while LM Studio is being made ready (server start / model download / load).
@@ -411,6 +419,10 @@ final class RecorderViewModel {
         guard !serbianText.isEmpty else { return }
         let mode = TranslationPreferences.outputMode
         resultTitle = mode.resultTitle
+        resultMode = mode
+        plannedStages = mode.plannedStages
+        liveStage = nil
+        resultRetrievedCount = 0
         setState(.translating)
         processingDetail = nil
         streamingText = ""
@@ -422,6 +434,9 @@ final class RecorderViewModel {
                 glossary: TranslationPreferences.glossary,
                 onProgress: { [weak self] detail in
                     Task { @MainActor in self?.processingDetail = detail }
+                },
+                onStage: { [weak self] progress in
+                    Task { @MainActor in self?.applyStage(progress) }
                 },
                 onDelta: { [weak self] delta in
                     Task { @MainActor in self?.appendStreamDelta(delta) }
@@ -477,6 +492,7 @@ final class RecorderViewModel {
         translationSource = inference.source
         processingDetail = nil
         streamingText = "" // the committed, sanitized outputText now replaces the live partial
+        liveStage = nil
         copyToPasteboard(cleaned)
         flashCopied()
         setState(.done)
@@ -535,6 +551,13 @@ final class RecorderViewModel {
         streamingText += delta
     }
 
+    /// Reflects a pipeline stage entry in the live stage strip (and the retrieved-notes count).
+    private func applyStage(_ progress: PipelineProgress) {
+        guard case .translating = state else { return }
+        liveStage = progress.stage
+        if let count = progress.retrievedCount { resultRetrievedCount = count }
+    }
+
     /// Turns a refinement failure into a user-facing error that keeps the transcript on screen
     /// and offers a way to recover (Retry always re-refines). The "Open LM Studio" action is
     /// offered ONLY when LM Studio is actually the active backend — never for the in-process
@@ -575,6 +598,9 @@ final class RecorderViewModel {
         serbianText = ""
         outputText = ""
         streamingText = ""
+        liveStage = nil
+        plannedStages = []
+        resultRetrievedCount = 0
         translationSource = nil
         notice = nil
         processingDetail = nil

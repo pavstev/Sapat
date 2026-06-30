@@ -32,6 +32,8 @@ actor ThoughtPipeline {
         let cleaned: String
         /// Structured extraction, when the mode ran the Extract stage.
         let extraction: Extraction?
+        /// How many past notes the Retrieve stage contributed (0 for pure-refine / no memory).
+        var retrievedCount: Int = 0
     }
 
     func run(
@@ -39,8 +41,10 @@ actor ThoughtPipeline {
         mode: OutputMode,
         glossary: String = "",
         onProgress: (@Sendable (String) -> Void)? = nil,
+        onStage: (@Sendable (PipelineProgress) -> Void)? = nil,
         onDelta: (@Sendable (String) -> Void)? = nil
     ) async throws -> Result {
+        onStage?(PipelineProgress(.clean))
         // 1. Clean — always. The whole-recording chunk/merge guarantee lives here. Stream it only
         //    for pure-refine modes, where the cleaned base IS the final user-visible artifact.
         let cleaned: String
@@ -62,6 +66,7 @@ actor ThoughtPipeline {
         // 2. Extract (structured).
         var extraction: Extraction?
         if mode.runsExtract {
+            onStage?(PipelineProgress(.extract))
             onProgress?("Extracting structure…")
             extraction = try await extract(cleaned)
         }
@@ -72,20 +77,24 @@ actor ThoughtPipeline {
             onProgress?("Recalling related notes…")
             retrieved = await memory.search(query: cleaned, limit: 3)
         }
+        onStage?(PipelineProgress(.retrieve, retrievedCount: retrieved.count))
         let recall = Self.retrievedBlock(retrieved)
 
         // 4. Reason + 5. Self-critique.
         var analysis: String?
         if mode.runsReason {
+            onStage?(PipelineProgress(.reason))
             onProgress?("Reasoning through it…")
             analysis = try await reason(cleaned: cleaned, extraction: extraction, recall: recall)
             if mode.runsCritique, let draft = analysis {
+                onStage?(PipelineProgress(.critique))
                 onProgress?("Checking for gaps & overclaims…")
                 analysis = try await critique(draft: draft, source: cleaned)
             }
         }
 
         // 6. Synthesize — the final user-visible stage for synthesis modes; stream it when asked.
+        onStage?(PipelineProgress(.synthesize))
         onProgress?("Writing the \(mode.label.lowercased())…")
         let artifact: String
         if let onDelta {
@@ -93,7 +102,7 @@ actor ThoughtPipeline {
         } else {
             artifact = try await synthesize(mode: mode, cleaned: cleaned, extraction: extraction, analysis: analysis, recall: recall, glossary: glossary)
         }
-        return Result(primary: artifact, cleaned: cleaned, extraction: extraction)
+        return Result(primary: artifact, cleaned: cleaned, extraction: extraction, retrievedCount: retrieved.count)
     }
 
     /// Renders retrieved memories as a clearly-fenced, optional context block. The prompts are

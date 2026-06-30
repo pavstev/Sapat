@@ -67,7 +67,10 @@ actor MLXInference: Inference {
         return try await session.respond(to: turns)
     }
 
-    func stream(_ request: InferenceRequest) -> AsyncThrowingStream<String, Error> {
+    // `nonisolated`: the protocol requirement is synchronous, so an actor must satisfy it
+    // without isolation. The body only awaits actor-isolated state (readyContainer) inside the
+    // Task, so this is data-race-safe.
+    nonisolated func stream(_ request: InferenceRequest) -> AsyncThrowingStream<String, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {

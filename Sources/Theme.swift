@@ -25,8 +25,10 @@ enum Theme {
     static let textPrimary = Color(red: 0.949, green: 0.922, blue: 0.886)
     /// Muted warm gray — secondary text. `#B8AE9F`.
     static let textSecondary = Color(red: 0.722, green: 0.682, blue: 0.624)
-    /// Faint warm gray — hints / labels. `#8A8073`.
-    static let textTertiary = Color(red: 0.541, green: 0.502, blue: 0.451)
+    /// Faint warm gray — hints / labels. `#9A9082`. Lightened one step from the original
+    /// `#8A8073` (which measured ~4.18:1 on stone) to clear the WCAG AA 4.5:1 floor for the
+    /// captions, hints, and meta lines that use it.
+    static let textTertiary = Color(red: 0.604, green: 0.565, blue: 0.510)
 
     /// Copper-tinted hairline for dividers and borders on stone.
     static let hairline = copperLight.opacity(0.16)
