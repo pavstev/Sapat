@@ -112,7 +112,7 @@ struct PopoverView: View {
             if let detail = vm.processingDetail { processingDetailView(detail) }
             if vm.canImport { importButton }
             preparingProgress
-            if let status = vm.lmStudioStatus { lmStudioStatusView(status) }
+            if let status = vm.engineStatus { engineStatusView(status) }
             if let notice = vm.notice { noticeView(notice) }
             if case .done = vm.state {
                 resultCard
@@ -301,7 +301,7 @@ struct PopoverView: View {
                                  color: Theme.textSecondary)
                     Rectangle().fill(Theme.hairline).frame(width: 1)
                     resultColumn(title: vm.resultTitle,
-                                 text: vm.englishText,
+                                 text: vm.outputText,
                                  font: .system(size: 14),
                                  color: Theme.textPrimary)
                 }
@@ -350,7 +350,7 @@ struct PopoverView: View {
                     .labelStyle(.titleAndIcon)
             }
             Spacer(minLength: 0)
-            Button { vm.copyEnglish() } label: {
+            Button { vm.copyOutput() } label: {
                 Label("Copy", systemImage: "doc.on.doc")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(Theme.stone)
@@ -364,7 +364,7 @@ struct PopoverView: View {
 
     // MARK: LM Studio warm-up status (server start / model download / load)
 
-    private func lmStudioStatusView(_ text: String) -> some View {
+    private func engineStatusView(_ text: String) -> some View {
         HStack(spacing: Theme.s2) {
             ProgressView().controlSize(.small)
             Text(text)

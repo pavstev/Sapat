@@ -28,13 +28,13 @@ final class RecorderViewModel {
     private(set) var levelHistory: [Double] = [] // recent levels for the menu-bar waveform
     private(set) var recordingDuration: TimeInterval = 0 // elapsed seconds, shown while recording
     private(set) var serbianText = ""
-    private(set) var englishText = ""
+    private(set) var outputText = ""
     /// Column title for the produced artifact in the result card (varies by Output Mode).
     private(set) var resultTitle: String = OutputModes.default.resultTitle
     private(set) var translationSource: TranslationSource?
     private(set) var notice: String? // transient info, e.g. "No speech detected"
     /// Non-nil while LM Studio is being made ready (server start / model download / load).
-    private(set) var lmStudioStatus: String?
+    private(set) var engineStatus: String?
     /// Sub-status during processing: elapsed transcription time, or "Refining N of M sections…".
     private(set) var processingDetail: String?
     /// File name when processing an imported recording (nil for live mic recordings).
@@ -169,7 +169,7 @@ final class RecorderViewModel {
                 try await self?.ensureInferenceReady()
             } catch {
                 Log.llm.info("Inference warm-up deferred: \(error.localizedDescription, privacy: .public)")
-                self?.setLMStudioStatus(nil)
+                self?.setEngineStatus(nil)
             }
         }
     }
@@ -308,9 +308,9 @@ final class RecorderViewModel {
     }
 
     /// Copies the current English translation to the clipboard (explicit Copy button).
-    func copyEnglish() {
-        guard !englishText.isEmpty else { return }
-        copyToPasteboard(englishText)
+    func copyOutput() {
+        guard !outputText.isEmpty else { return }
+        copyToPasteboard(outputText)
         flashCopied()
     }
 
@@ -422,13 +422,13 @@ final class RecorderViewModel {
             )
             finish(english: result.primary)
         } catch is CancellationError {
-            setLMStudioStatus(nil)
+            setEngineStatus(nil)
             processingDetail = nil
             setState(.idle)
         } catch {
-            setLMStudioStatus(nil)
+            setEngineStatus(nil)
             processingDetail = nil
-            let appError = lmStudioError(for: error)
+            let appError = inferenceError(for: error)
             // Keep the transcript + recording in History so the refine can be retried.
             upsertHistory(serbian: serbianText, english: "", status: .failed, error: appError.message)
             setState(.error(appError))
@@ -438,7 +438,7 @@ final class RecorderViewModel {
     /// Ensures the server is up and the configured model is loaded, coalescing a concurrent
     /// launch warm-up so two `lms` downloads/loads never run at once. The off-main readiness
     /// work reports progress through an `AsyncStream` (it can't touch main-actor state
-    /// directly), which we drain here to update `lmStudioStatus`.
+    /// directly), which we drain here to update `engineStatus`.
     private func ensureInferenceReady() async throws {
         if let existing = readinessTask {
             try await existing.value
@@ -454,9 +454,9 @@ final class RecorderViewModel {
     }
 
     private func performReadiness() async throws {
-        defer { setLMStudioStatus(nil) }
+        defer { setEngineStatus(nil) }
         try await inference.prepare { [weak self] status in
-            Task { @MainActor in self?.setLMStudioStatus(status) }
+            Task { @MainActor in self?.setEngineStatus(status) }
         }
     }
 
@@ -466,7 +466,7 @@ final class RecorderViewModel {
             setState(.error(AppError(message: "The translation came back empty.", action: nil)))
             return
         }
-        englishText = cleaned
+        outputText = cleaned
         translationSource = inference.source
         processingDetail = nil
         copyToPasteboard(cleaned)
@@ -515,16 +515,16 @@ final class RecorderViewModel {
 
     // MARK: Helpers
 
-    private func setLMStudioStatus(_ status: String?) {
-        guard status != lmStudioStatus else { return } // avoid redundant SwiftUI invalidations
-        lmStudioStatus = status
+    private func setEngineStatus(_ status: String?) {
+        guard status != engineStatus else { return } // avoid redundant SwiftUI invalidations
+        engineStatus = status
     }
 
     /// Turns a refinement failure into a user-facing error that keeps the transcript on screen
     /// and offers a way to recover (Retry always re-refines). The "Open LM Studio" action is
     /// offered ONLY when LM Studio is actually the active backend — never for the in-process
     /// MLX engine, whose failures are not fixed by opening LM Studio.
-    private func lmStudioError(for error: Error) -> AppError {
+    private func inferenceError(for error: Error) -> AppError {
         let openLMStudio = RecoveryAction(label: "Open LM Studio", kind: .openLMStudio)
         guard let lmError = error as? LMStudioError else {
             // Generic / in-process-engine failure (e.g. InferenceError): plain Retry unless the
@@ -558,7 +558,7 @@ final class RecorderViewModel {
 
     private func clearResults() {
         serbianText = ""
-        englishText = ""
+        outputText = ""
         translationSource = nil
         notice = nil
         processingDetail = nil
