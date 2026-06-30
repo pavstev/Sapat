@@ -13,11 +13,17 @@ packages:
   GRDB:
     url: https://github.com/groue/GRDB.swift
     from: "7.0.0"
-  # MLX engine (added during the one-time activation — see AGENTS.md):
-  #   MLXSwiftLM:
-  #     url: https://github.com/ml-explore/mlx-swift-lm
-  #     from: "<pin>"
-  # then add products MLXLLM + MLXLMCommon to the dependencies below.
+  # In-process MLX engine (xcodebuild only — compiles MLX's Metal kernels). The HuggingFace +
+  # Tokenizers packages back the mlx-swift-lm 3.31.x #huggingFaceLoadModelContainer macro.
+  MLXSwiftLM:
+    url: https://github.com/ml-explore/mlx-swift-lm
+    from: "3.31.4"
+  SwiftTransformers:
+    url: https://github.com/huggingface/swift-transformers
+    from: "1.3.0"
+  SwiftHuggingFace:
+    url: https://github.com/huggingface/swift-huggingface
+    from: "0.9.0"
 
 targets:
   Sapat:
@@ -32,6 +38,16 @@ targets:
         product: WhisperKit
       - package: GRDB
         product: GRDB
+      - package: MLXSwiftLM
+        product: MLXLLM
+      - package: MLXSwiftLM
+        product: MLXLMCommon
+      - package: MLXSwiftLM
+        product: MLXHuggingFace
+      - package: SwiftTransformers
+        product: Tokenizers
+      - package: SwiftHuggingFace
+        product: HuggingFace
     settings:
       base:
         PRODUCT_NAME: Sapat

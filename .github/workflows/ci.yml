@@ -21,13 +21,12 @@ jobs:
       - name: Toolchain
         run: swift --version && xcodebuild -version
 
+      # Fast PR checks: run the suite and compile the engine-agnostic layers via SwiftPM. The
+      # MLX engine (gated by `#if canImport(MLXLLM)`) is built + validated by the release
+      # workflow's xcodebuild and by a local `./bundle.sh` — it needs the heavy Metal toolchain,
+      # which we don't pay on every push.
       - name: Test
         run: swift test
 
-      - name: Build and bundle
-        run: ./bundle.sh
-
-      - name: Verify bundle
-        run: |
-          codesign --verify --verbose=2 Sapat.app
-          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" Sapat.app/Contents/Info.plist
+      - name: Build (engine-agnostic layers)
+        run: swift build -c release

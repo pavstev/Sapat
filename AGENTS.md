@@ -53,18 +53,23 @@ Requirements: macOS 14+ (Apple Silicon), `curl` + `python3` (preinstalled on mac
 ## Build from source
 
 ```sh
-./bundle.sh && open Sapat.app    # currently: swift build + assemble & ad-hoc sign
+brew install xcodegen                       # one-time
+./bundle.sh && open Sapat.app               # xcodegen + xcodebuild + ad-hoc sign (MLX engine)
 ```
 
-Today `bundle.sh` uses `swift build` (Command Line Tools), which compiles the **engine-agnostic
-layers** (Inference, Pipeline, Memory, Updater) — the `Inference` default then resolves to the
-optional LM Studio backend, since the in-process MLX engine is staged behind
-`#if canImport(MLXLLM)`.
+`bundle.sh` uses **`xcodebuild`** when full Xcode is present — required for the in-process MLX
+engine, whose Metal kernels (`default.metallib`) only Xcode's toolchain compiles (a plain
+`swift build` produces a binary that crashes on the first GPU op). It generates the project with
+XcodeGen, builds with `-skipPackagePluginValidation -skipMacroValidation` (to auto-trust the
+mlx-swift build plugin + HuggingFace macros non-interactively), and ad-hoc signs.
 
-The **self-contained default (MLX)** requires the **full Xcode** toolchain because MLX Swift's
-Metal kernels (`default.metallib`) are compiled by Xcode's Metal compiler and are not shipped
-precompiled — a plain `swift build` produces a binary that crashes on the first GPU op. Turning
-it on is the one-time activation below; after that, `bundle.sh` drives `xcodebuild`.
+First-time Xcode setup needs the Metal toolchain: `xcodebuild -downloadComponent MetalToolchain`
+(and `xcodebuild -runFirstLaunch` on a fresh install).
+
+`bundle.sh` **falls back to `swift build`** under the Command Line Tools, which compiles the
+engine-agnostic layers (Inference, Pipeline, Memory, Updater) only — MLX is gated out via
+`#if canImport(MLXLLM)`, so the `Inference` default there resolves to the LM Studio backend.
+Use the fallback for fast iteration on non-MLX code; ship via `xcodebuild`.
 
 ## Conventions & gotchas (if you edit the code)
 
@@ -102,19 +107,30 @@ it on is the one-time activation below; after that, `bundle.sh` drives `xcodebui
   git push origin vX.Y.Z`. Always verify a change by building + launching (menu-bar agent, no
   Dock icon).
 
-## Activating / validating the MLX engine (one-time, needs full Xcode)
+## How the MLX engine is wired (live)
 
-The in-process MLX engine is staged behind `#if canImport(MLXLLM)`. To turn it on:
+The in-process MLX engine (`Sources/Inference/MLXInference.swift`, gated by
+`#if canImport(MLXLLM)`) is the default backend in the xcodebuild build. Wiring:
 
-1. Install full Xcode (`xcodes install --latest`; `sudo xcode-select -s …`).
-2. Add the package dependency in **`Package.swift`** and **`project.yml`**:
-   `https://github.com/ml-explore/mlx-swift-lm` → products `MLXLLM`, `MLXLMCommon`.
-3. `./bundle.sh` (now uses `xcodebuild`). `canImport(MLXLLM)` becomes true, so `MLXInference`
-   compiles and becomes the default backend; verify `Sapat.app/Contents/.../mlx-swift_Cmlx.bundle/default.metallib`
-   ships, and validate `MLXInference` against the pinned `mlx-swift-lm` API (the model-load /
-   generate calls are the version-sensitive surface).
-4. `xcodebuild test -scheme Sapat` — run the full suite (XCTest needs Xcode; it is unavailable
-   to `swift test` under the Command Line Tools).
+- **Packages (in `project.yml` only, NOT `Package.swift`)** — so `xcodebuild` builds with MLX
+  while `swift build` stays MLX-free for CLT iteration:
+  - `ml-explore/mlx-swift-lm` (3.31.x) → `MLXLLM`, `MLXLMCommon`, `MLXHuggingFace`
+  - `huggingface/swift-transformers` (1.3.x) → `Tokenizers`
+  - `huggingface/swift-huggingface` (0.9.x) → `HuggingFace`
+  The HuggingFace + Tokenizers packages back the `#huggingFaceLoadModelContainer` macro
+  (mlx-swift-lm doesn't vendor them).
+- **Load + generate:** `#huggingFaceLoadModelContainer(configuration:progressHandler:)` to load
+  (default hub client + tokenizer loader; model cached outside the bundle), then a fresh
+  `ChatSession` per call for stateless generation (the pipeline owns all context).
+- **Model:** `mlx-community/Qwen3-4B-4bit` (Apache-2.0) by default.
+- **Build flags:** `-skipPackagePluginValidation -skipMacroValidation` (auto-trust the mlx-swift
+  build plugin + macros); the Metal toolchain must be present
+  (`xcodebuild -downloadComponent MetalToolchain`).
+
+To bump the model or mlx-swift-lm version, edit `MLXInference.defaultModelID` / `project.yml`,
+re-run `./bundle.sh`, and re-validate the `ChatSession`/`Chat.Message` calls (the
+version-sensitive surface). XCTest runs via `swift test` (engine-agnostic) or
+`xcodebuild test -scheme Sapat`.
 
 ## Notarization (when a Developer ID is available)
 

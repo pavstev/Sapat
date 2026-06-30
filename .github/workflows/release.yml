@@ -21,7 +21,15 @@ jobs:
         id: version
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
-      - name: Build and bundle
+      # The shippable build uses xcodebuild (in-process MLX engine). It needs XcodeGen and the
+      # Metal toolchain to compile MLX's kernels into default.metallib.
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Download Metal Toolchain
+        run: xcodebuild -downloadComponent MetalToolchain
+
+      - name: Build and bundle (xcodebuild, MLX engine)
         env:
           SAPAT_VERSION: ${{ steps.version.outputs.version }}
         run: ./bundle.sh

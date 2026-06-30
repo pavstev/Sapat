@@ -89,18 +89,19 @@ No external apps are required.
 ## Build from source
 
 ```sh
+brew install xcodegen                          # one-time
 git clone https://github.com/pavstev/sapat.git && cd sapat
-./bundle.sh && open Sapat.app        # swift build + assemble & ad-hoc sign
+./bundle.sh && open Sapat.app                  # xcodegen + xcodebuild + ad-hoc sign
 ```
 
-The in-process **MLX** engine (the self-contained default) requires the **full Xcode**
-toolchain — `xcodebuild` compiles MLX's Metal kernels, which the Command Line Tools cannot — so
-it is staged behind `#if canImport(MLXLLM)`. The engine-agnostic layers (Inference, Pipeline,
-Memory, Updater) build and test under the Command Line Tools today; the one-time MLX activation
-(wire the package, switch to `xcodebuild`) is documented in [AGENTS.md](AGENTS.md).
+`bundle.sh` builds with `xcodebuild` (the in-process **MLX** engine's Metal kernels need
+Xcode's toolchain — first time: `xcodebuild -downloadComponent MetalToolchain`). It falls back
+to `swift build` under the Command Line Tools, which compiles the engine-agnostic layers
+(Inference, Pipeline, Memory, Updater) with MLX gated out via `#if canImport(MLXLLM)`. See
+[AGENTS.md](AGENTS.md) for the engine wiring.
 
-Overrides: `SAPAT_VERSION=1.2.3` stamps a version; `SAPAT_UNIVERSAL=1` builds universal.
-Tests: `swift test` (XCTest; the full suite runs under Xcode, which the CI uses).
+Overrides: `SAPAT_VERSION=1.2.3` stamps a version. Tests: `swift test` (the engine-agnostic
+suite, 110 tests).
 
 ## Releasing
 
