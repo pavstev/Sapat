@@ -68,22 +68,28 @@ enum Tone: String, CaseIterable, Identifiable {
     }
 }
 
-/// UserDefaults-backed access to the tone + glossary. The tone is chosen from the on-screen
-/// `TonePicker` (`@AppStorage`, same `toneKey`); the glossary and model id keep working from
-/// their defaults (there's no Settings screen — the app is a single screen).
+/// UserDefaults-backed access to the selected Output Mode + glossary. The mode is chosen from
+/// the on-screen `OutputModePicker` (`@AppStorage`, same `modeKey`); the glossary and model id
+/// keep working from their defaults (there's no Settings screen — the app is a single screen).
 enum TranslationPreferences {
+    /// New: the selected Output Mode id. Replaces the closed tone selection.
+    static let modeKey = "outputMode"
+    /// Legacy tone key — kept only so an old install's value is recognized (any prior tone
+    /// selection falls back to the default mode; modes replace tones).
     static let toneKey = "translationTone"
     static let glossaryKey = "translationGlossary"
     static let modelKey = "translationModel"
 
-    /// LM Studio model id used by default — Qwen3-8B (MLX), a strong multilingual model
-    /// with good Serbian coverage and reliable instruction-following. This is the exact
-    /// id LM Studio reports for the bundled download; override in Settings to match
-    /// whatever you load.
+    /// Default reasoner model id — Qwen3-class (MLX), a strong multilingual model with good
+    /// Serbian coverage. Used by the LM Studio backend; the in-process MLX engine resolves its
+    /// own bundled/managed model.
     static let defaultModel = "qwen/qwen3-8b"
 
-    static var tone: Tone {
-        Tone(rawValue: UserDefaults.standard.string(forKey: toneKey) ?? "") ?? .technical
+    /// The selected Output Mode (defaults to Polished English). An old tone selection simply
+    /// falls back to the default — modes replace tones.
+    static var outputMode: OutputMode {
+        let id = UserDefaults.standard.string(forKey: modeKey) ?? ""
+        return id.isEmpty ? OutputModes.default : OutputModes.mode(id: id)
     }
 
     static var glossary: String {

@@ -10,7 +10,7 @@ import SwiftUI
 /// able to pop the window open from any app.
 ///
 /// There is no Settings screen: the popover is the whole app, and the one preference
-/// (tone) is chosen inline via `TonePicker`. SwiftUI's `App` still requires a `Scene`,
+/// (Output Mode) is chosen inline via `OutputModePicker`. SwiftUI's `App` still requires a `Scene`,
 /// and an empty `Settings` is the only one that never spawns a visible window — and an
 /// agent app has no app menu, so it surfaces nothing to the user either. It's an inert
 /// placeholder so all real UI stays in the AppKit popover.

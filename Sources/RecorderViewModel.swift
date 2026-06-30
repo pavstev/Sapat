@@ -29,6 +29,8 @@ final class RecorderViewModel {
     private(set) var recordingDuration: TimeInterval = 0 // elapsed seconds, shown while recording
     private(set) var serbianText = ""
     private(set) var englishText = ""
+    /// Column title for the produced artifact in the result card (varies by Output Mode).
+    private(set) var resultTitle: String = OutputModes.default.resultTitle
     private(set) var translationSource: TranslationSource?
     private(set) var notice: String? // transient info, e.g. "No speech detected"
     /// Non-nil while LM Studio is being made ready (server start / model download / load).
@@ -84,7 +86,7 @@ final class RecorderViewModel {
     /// touches a caller — refinement goes through the `Inference` protocol and `Refiner`, so
     /// the orchestrator no longer hard-depends on LM Studio (F1).
     private let inference: any Inference = LMStudioInference()
-    @ObservationIgnored private lazy var refiner = Refiner(inference: inference)
+    @ObservationIgnored private lazy var pipeline = ThoughtPipeline(inference: inference)
     /// Coalesces concurrent readiness work (the launch warm-up and a refine) so we never run
     /// two model downloads/loads at once.
     private var readinessTask: Task<Void, Error>?
@@ -393,19 +395,21 @@ final class RecorderViewModel {
     /// said is lost.
     private func refine() async {
         guard !serbianText.isEmpty else { return }
+        let mode = TranslationPreferences.outputMode
+        resultTitle = mode.resultTitle
         setState(.translating)
         processingDetail = nil
         do {
             try await ensureInferenceReady()
-            let english = try await refiner.refine(
-                serbianText,
-                tone: TranslationPreferences.tone,
+            let result = try await pipeline.run(
+                transcript: serbianText,
+                mode: mode,
                 glossary: TranslationPreferences.glossary,
                 onProgress: { [weak self] detail in
                     Task { @MainActor in self?.processingDetail = detail }
                 }
             )
-            finish(english: english)
+            finish(english: result.primary)
         } catch is CancellationError {
             setLMStudioStatus(nil)
             processingDetail = nil

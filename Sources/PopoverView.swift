@@ -106,7 +106,7 @@ struct PopoverView: View {
 
     private var recordContent: some View {
         VStack(spacing: Theme.s4) {
-            TonePicker()
+            OutputModePicker()
             recordButton
             statusLine
             if let detail = vm.processingDetail { processingDetailView(detail) }
@@ -300,7 +300,7 @@ struct PopoverView: View {
                                  font: .system(size: 13),
                                  color: Theme.textSecondary)
                     Rectangle().fill(Theme.hairline).frame(width: 1)
-                    resultColumn(title: "ENGLISH",
+                    resultColumn(title: vm.resultTitle,
                                  text: vm.englishText,
                                  font: .system(size: 14),
                                  color: Theme.textPrimary)
@@ -351,7 +351,7 @@ struct PopoverView: View {
             }
             Spacer(minLength: 0)
             Button { vm.copyEnglish() } label: {
-                Label("Copy English", systemImage: "doc.on.doc")
+                Label("Copy", systemImage: "doc.on.doc")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(Theme.stone)
                     .padding(.horizontal, Theme.s3)

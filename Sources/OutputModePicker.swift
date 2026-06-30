@@ -1,16 +1,16 @@
 import SwiftUI
 
-/// On-screen tone selector — the app's single screen, so there's no Settings window. A
-/// compact dropdown: tap to reveal the five presets, hover any one to pop up a short
-/// explanation of what it does. The choice persists via `@AppStorage` under the same
-/// `toneKey` the `RecorderViewModel` reads, so the next refinement picks it up live.
-struct TonePicker: View {
-    @AppStorage(TranslationPreferences.toneKey) private var toneRaw = Tone.technical.rawValue
+/// On-screen Output Mode selector — the app's single screen, so there's no Settings window. A
+/// compact dropdown: tap to reveal the modes, hover any one to pop up a short explanation. The
+/// choice persists via `@AppStorage` under the `modeKey` the `RecorderViewModel` reads, so the
+/// next run picks it up live. (Generalizes the former five-tone `TonePicker` into the Output
+/// Modes set without changing the popover layout.)
+struct OutputModePicker: View {
+    @AppStorage(TranslationPreferences.modeKey) private var modeRaw = OutputModes.default.id
     @State private var isOpen = false
-    /// The row the pointer is over — drives both the highlight and its explanation popup.
-    @State private var hovered: Tone?
+    @State private var hovered: String?
 
-    private var selected: Tone { Tone(rawValue: toneRaw) ?? .technical }
+    private var selected: OutputMode { OutputModes.mode(id: modeRaw) }
 
     var body: some View {
         VStack(spacing: Theme.s1 + 2) {
@@ -28,10 +28,10 @@ struct TonePicker: View {
             if !isOpen { hovered = nil }
         } label: {
             HStack(spacing: Theme.s2) {
-                Image(systemName: "textformat")
+                Image(systemName: "slider.horizontal.3")
                     .font(.system(size: 12))
                     .foregroundStyle(Theme.textTertiary)
-                Text("Tone")
+                Text("Mode")
                     .font(.system(size: 12))
                     .foregroundStyle(Theme.textTertiary)
                 Spacer()
@@ -52,15 +52,15 @@ struct TonePicker: View {
         }
         .buttonStyle(.plain)
         .cardSurface(Theme.rSmall)
-        .help("Choose how Šapat phrases the English")
+        .help("Choose what Šapat turns your speech into")
     }
 
-    // MARK: Expanded list of presets
+    // MARK: Expanded list of modes
 
     private var list: some View {
         VStack(spacing: 1) {
-            ForEach(Tone.allCases) { tone in
-                row(tone)
+            ForEach(OutputModes.all) { mode in
+                row(mode)
             }
         }
         .padding(Theme.s1)
@@ -68,20 +68,20 @@ struct TonePicker: View {
         .transition(.opacity.combined(with: .move(edge: .top)))
     }
 
-    private func row(_ tone: Tone) -> some View {
-        let isSelected = tone == selected
-        let isHover = hovered == tone
+    private func row(_ mode: OutputMode) -> some View {
+        let isSelected = mode.id == selected.id
+        let isHover = hovered == mode.id
         return Button {
-            toneRaw = tone.rawValue
+            modeRaw = mode.id
             isOpen = false
             hovered = nil
         } label: {
             HStack(spacing: Theme.s2) {
-                Image(systemName: tone.icon)
+                Image(systemName: mode.icon)
                     .font(.system(size: 12))
                     .foregroundStyle(isSelected ? Theme.copper : Theme.copperLight)
                     .frame(width: 18)
-                Text(tone.label)
+                Text(mode.label)
                     .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
                     .foregroundStyle(Theme.textPrimary)
                 Spacer()
@@ -101,45 +101,43 @@ struct TonePicker: View {
         }
         .buttonStyle(.plain)
         .onHover { inside in
-            if inside { hovered = tone }
-            else if hovered == tone { hovered = nil }
+            if inside { hovered = mode.id }
+            else if hovered == mode.id { hovered = nil }
         }
-        .popover(isPresented: hoverBinding(for: tone), arrowEdge: .trailing) {
-            explanation(tone)
+        .popover(isPresented: hoverBinding(for: mode), arrowEdge: .trailing) {
+            explanation(mode)
         }
     }
 
-    /// Presents the explanation while this row is hovered; lets SwiftUI clear the hover when
-    /// it dismisses the popover itself.
-    private func hoverBinding(for tone: Tone) -> Binding<Bool> {
+    private func hoverBinding(for mode: OutputMode) -> Binding<Bool> {
         Binding(
-            get: { hovered == tone },
-            set: { presented in if !presented, hovered == tone { hovered = nil } }
+            get: { hovered == mode.id },
+            set: { presented in if !presented, hovered == mode.id { hovered = nil } }
         )
     }
 
-    private func explanation(_ tone: Tone) -> some View {
+    private func explanation(_ mode: OutputMode) -> some View {
         VStack(alignment: .leading, spacing: Theme.s2) {
             HStack(spacing: Theme.s2) {
-                Image(systemName: tone.icon)
+                Image(systemName: mode.icon)
                     .font(.system(size: 12))
                     .foregroundStyle(Theme.copperLight)
-                Text(tone.label)
+                Text(mode.label)
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Theme.textPrimary)
             }
-            Text(tone.summary)
+            Text(mode.summary)
                 .font(.caption)
                 .foregroundStyle(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
-            Text(tone.example)
+            Text(mode.example)
                 .font(.caption2)
                 .italic()
                 .foregroundStyle(Theme.textTertiary)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(Theme.s3)
-        .frame(width: 250, alignment: .leading)
+        .frame(width: 260, alignment: .leading)
         .background(Theme.stoneRaised)
         .environment(\.colorScheme, .dark)
     }
