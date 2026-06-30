@@ -520,12 +520,17 @@ final class RecorderViewModel {
         lmStudioStatus = status
     }
 
-    /// Turns an LM Studio failure into a user-facing error that keeps the transcript on
-    /// screen and offers a way to fix things (Retry re-refines; the action opens LM Studio).
+    /// Turns a refinement failure into a user-facing error that keeps the transcript on screen
+    /// and offers a way to recover (Retry always re-refines). The "Open LM Studio" action is
+    /// offered ONLY when LM Studio is actually the active backend — never for the in-process
+    /// MLX engine, whose failures are not fixed by opening LM Studio.
     private func lmStudioError(for error: Error) -> AppError {
         let openLMStudio = RecoveryAction(label: "Open LM Studio", kind: .openLMStudio)
         guard let lmError = error as? LMStudioError else {
-            return AppError(message: "Couldn't refine the translation. \(error.localizedDescription)", action: openLMStudio)
+            // Generic / in-process-engine failure (e.g. InferenceError): plain Retry unless the
+            // backend really is LM Studio.
+            let action = inference is LMStudioInference ? openLMStudio : nil
+            return AppError(message: "Couldn't refine the translation. \(error.localizedDescription)", action: action)
         }
         switch lmError {
         case .cliNotFound:
