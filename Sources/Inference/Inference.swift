@@ -21,6 +21,11 @@ protocol Inference: Sendable {
     /// reasoning stages deliberately do not).
     func generate(_ request: InferenceRequest) async throws -> String
 
+    /// Streamed generation: yields incremental RAW assistant-text deltas whose concatenation
+    /// equals `generate`'s return. Same no-sanitization contract as `generate` — callers
+    /// sanitize the *complete* text. Cancelling the consuming task tears generation down.
+    func stream(_ request: InferenceRequest) -> AsyncThrowingStream<String, Error>
+
     /// Generation constrained to a JSON schema; decode into `T`. The default implementation
     /// (see the extension) instructs strict-JSON output and repairs-and-retries once before
     /// failing — backends with native grammar/schema-constrained decoding may override.
@@ -38,6 +43,23 @@ protocol Inference: Sendable {
 extension Inference {
     /// Convenience: prepare without observing status.
     func prepare() async throws { try await prepare(onStatus: { _ in }) }
+
+    /// Default: no real token streaming — run `generate()` and emit the whole reply as one
+    /// delta. Lets a backend adopt streaming incrementally without touching callers, and keeps
+    /// test doubles trivial. Backends with native streaming (MLX, LM Studio SSE) override this.
+    func stream(_ request: InferenceRequest) -> AsyncThrowingStream<String, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    continuation.yield(try await generate(request))
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
 
     /// Default structured generation: ask for strict JSON matching `schema`, parse it, and on
     /// failure repair-and-retry exactly once (per the architecture's §6 contract) before

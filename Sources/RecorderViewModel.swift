@@ -29,6 +29,9 @@ final class RecorderViewModel {
     private(set) var recordingDuration: TimeInterval = 0 // elapsed seconds, shown while recording
     private(set) var serbianText = ""
     private(set) var outputText = ""
+    /// Live, RAW partial output streamed from the engine while `.translating`; the committed,
+    /// sanitized `outputText` replaces it on completion. Empty unless a stream is in flight.
+    private(set) var streamingText = ""
     /// Column title for the produced artifact in the result card (varies by Output Mode).
     private(set) var resultTitle: String = OutputModes.default.resultTitle
     private(set) var translationSource: TranslationSource?
@@ -410,6 +413,7 @@ final class RecorderViewModel {
         resultTitle = mode.resultTitle
         setState(.translating)
         processingDetail = nil
+        streamingText = ""
         do {
             try await ensureInferenceReady()
             let result = try await pipeline.run(
@@ -418,6 +422,9 @@ final class RecorderViewModel {
                 glossary: TranslationPreferences.glossary,
                 onProgress: { [weak self] detail in
                     Task { @MainActor in self?.processingDetail = detail }
+                },
+                onDelta: { [weak self] delta in
+                    Task { @MainActor in self?.appendStreamDelta(delta) }
                 }
             )
             finish(english: result.primary)
@@ -469,6 +476,7 @@ final class RecorderViewModel {
         outputText = cleaned
         translationSource = inference.source
         processingDetail = nil
+        streamingText = "" // the committed, sanitized outputText now replaces the live partial
         copyToPasteboard(cleaned)
         flashCopied()
         setState(.done)
@@ -520,6 +528,13 @@ final class RecorderViewModel {
         engineStatus = status
     }
 
+    /// Appends a streamed delta to the live partial — only while translating, so a delta that
+    /// lands after a cancel/finish can't corrupt the committed result.
+    private func appendStreamDelta(_ delta: String) {
+        guard case .translating = state else { return }
+        streamingText += delta
+    }
+
     /// Turns a refinement failure into a user-facing error that keeps the transcript on screen
     /// and offers a way to recover (Retry always re-refines). The "Open LM Studio" action is
     /// offered ONLY when LM Studio is actually the active backend — never for the in-process
@@ -559,6 +574,7 @@ final class RecorderViewModel {
     private func clearResults() {
         serbianText = ""
         outputText = ""
+        streamingText = ""
         translationSource = nil
         notice = nil
         processingDetail = nil

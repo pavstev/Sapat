@@ -38,12 +38,21 @@ actor ThoughtPipeline {
         transcript serbian: String,
         mode: OutputMode,
         glossary: String = "",
-        onProgress: (@Sendable (String) -> Void)? = nil
+        onProgress: (@Sendable (String) -> Void)? = nil,
+        onDelta: (@Sendable (String) -> Void)? = nil
     ) async throws -> Result {
-        // 1. Clean — always. The whole-recording chunk/merge guarantee lives here.
-        let cleaned = try await refiner.refine(
-            serbian, language: mode.cleanLanguage, register: mode.register,
-            glossary: glossary, onProgress: onProgress)
+        // 1. Clean — always. The whole-recording chunk/merge guarantee lives here. Stream it only
+        //    for pure-refine modes, where the cleaned base IS the final user-visible artifact.
+        let cleaned: String
+        if mode.isPureRefine, let onDelta {
+            cleaned = try await refiner.refineStreaming(
+                serbian, language: mode.cleanLanguage, register: mode.register,
+                glossary: glossary, onProgress: onProgress, onDelta: onDelta)
+        } else {
+            cleaned = try await refiner.refine(
+                serbian, language: mode.cleanLanguage, register: mode.register,
+                glossary: glossary, onProgress: onProgress)
+        }
 
         // Pure-refine modes: the cleaned base IS the artifact (Polished English/Serbian).
         guard !mode.isPureRefine else {
@@ -76,9 +85,14 @@ actor ThoughtPipeline {
             }
         }
 
-        // 6. Synthesize.
+        // 6. Synthesize — the final user-visible stage for synthesis modes; stream it when asked.
         onProgress?("Writing the \(mode.label.lowercased())…")
-        let artifact = try await synthesize(mode: mode, cleaned: cleaned, extraction: extraction, analysis: analysis, recall: recall, glossary: glossary)
+        let artifact: String
+        if let onDelta {
+            artifact = try await synthesizeStreaming(mode: mode, cleaned: cleaned, extraction: extraction, analysis: analysis, recall: recall, glossary: glossary, onDelta: onDelta)
+        } else {
+            artifact = try await synthesize(mode: mode, cleaned: cleaned, extraction: extraction, analysis: analysis, recall: recall, glossary: glossary)
+        }
         return Result(primary: artifact, cleaned: cleaned, extraction: extraction)
     }
 
@@ -127,6 +141,17 @@ actor ThoughtPipeline {
         let user = PromptFragments.groundedMessage(cleaned: cleaned, extraction: extraction, analysis: analysis, recall: recall)
         let raw = try await inference.generate(
             InferenceRequest(system: system, user: user, temperature: 0.2))
+        return try OutputSanitizer.sanitizedNonEmpty(raw)
+    }
+
+    private func synthesizeStreaming(mode: OutputMode, cleaned: String, extraction: Extraction?, analysis: String?, recall: String, glossary: String, onDelta: @escaping @Sendable (String) -> Void) async throws -> String {
+        let system = PipelinePrompts.synthesisSystem(instruction: mode.synthesisInstruction ?? "", glossary: glossary)
+        let user = PromptFragments.groundedMessage(cleaned: cleaned, extraction: extraction, analysis: analysis, recall: recall)
+        var raw = ""
+        for try await delta in inference.stream(InferenceRequest(system: system, user: user, temperature: 0.2)) {
+            raw += delta
+            onDelta(delta)
+        }
         return try OutputSanitizer.sanitizedNonEmpty(raw)
     }
 }

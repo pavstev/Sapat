@@ -114,6 +114,9 @@ struct PopoverView: View {
             preparingProgress
             if let status = vm.engineStatus { engineStatusView(status) }
             if let notice = vm.notice { noticeView(notice) }
+            if case .translating = vm.state, !vm.streamingText.isEmpty {
+                streamingCard
+            }
             if case .done = vm.state {
                 resultCard
             }
@@ -314,6 +317,32 @@ struct PopoverView: View {
                 .padding(.horizontal, Theme.s3)
                 .padding(.vertical, Theme.s2 + 2)
                 .overlay(alignment: .top) { Rectangle().fill(Theme.hairline).frame(height: 0.5) }
+        }
+        .cardSurface()
+    }
+
+    // MARK: Live streaming result (while .translating, before the committed result lands)
+
+    /// Shows the engine's output filling in live. The text is RAW (unsanitized); on `.done` the
+    /// committed, sanitized `resultCard` replaces it.
+    private var streamingCard: some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                HStack(alignment: .top, spacing: Theme.s3) {
+                    resultColumn(title: "СРПСКИ",
+                                 text: vm.serbianText.isEmpty ? "—" : vm.serbianText,
+                                 font: .system(size: 13),
+                                 color: Theme.textSecondary)
+                    Rectangle().fill(Theme.hairline).frame(width: 1)
+                    resultColumn(title: vm.resultTitle,
+                                 text: vm.streamingText,
+                                 font: .system(size: 14),
+                                 color: Theme.textPrimary)
+                }
+                .padding(Theme.s3)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
+            .frame(maxHeight: resultMaxHeight)
         }
         .cardSurface()
     }

@@ -67,6 +67,36 @@ actor MLXInference: Inference {
         return try await session.respond(to: turns)
     }
 
+    func stream(_ request: InferenceRequest) -> AsyncThrowingStream<String, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    let container = try await readyContainer()
+                    let system = request.messages.first { $0.role == .system }?.content
+                    let turns: [Chat.Message] = request.messages.compactMap { message in
+                        switch message.role {
+                        case .system: return nil
+                        case .user: return .user(message.content)
+                        case .assistant: return .assistant(message.content)
+                        }
+                    }
+                    let parameters = GenerateParameters(
+                        maxTokens: request.maxTokens ?? 1024,
+                        temperature: Float(request.temperature))
+                    let session = ChatSession(container, instructions: system, generateParameters: parameters)
+                    for try await delta in session.streamResponse(to: turns) {
+                        if Task.isCancelled { break }
+                        continuation.yield(delta)
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
     var contextWindow: Int { get async { maxContext } }
 
     private func readyContainer() async throws -> ModelContainer {

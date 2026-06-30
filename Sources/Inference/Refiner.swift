@@ -96,6 +96,43 @@ actor Refiner {
         return try OutputSanitizer.sanitizedNonEmpty(raw)
     }
 
+    /// Streaming variant of the SINGLE-PASS clean path: yields raw deltas to `onDelta`, then
+    /// sanitizes the complete text. Polished output stays identical to the non-streaming path
+    /// (same system+user+temperature+maxTokens, same `OutputSanitizer` on the full reply). A long
+    /// transcript that needs chunk/merge falls back to non-streaming `refine` — the
+    /// whole-recording guarantee is a property of the merged whole, not of any partial — with the
+    /// usual "Section N of M…" progress.
+    func refineStreaming(
+        _ serbian: String,
+        language: RefineLanguage,
+        register: String,
+        glossary: String = "",
+        onProgress: (@Sendable (String) -> Void)? = nil,
+        onDelta: @escaping @Sendable (String) -> Void
+    ) async throws -> String {
+        let context = await inference.contextWindow
+        let budget = Double(context) * contextSafety
+        let system = systemPrompt(language: language, register: register, glossary: glossary)
+        let systemTokens = TranscriptChunker.estimateTokens(system)
+        let transcriptTokens = TranscriptChunker.estimateTokens(serbian)
+        guard Double(systemTokens + transcriptTokens * 2 + 32) <= budget else {
+            return try await refine(serbian, language: language, register: register, glossary: glossary, onProgress: onProgress)
+        }
+        return try await completeStreaming(system: system, user: serbian, context: context, onDelta: onDelta)
+    }
+
+    private func completeStreaming(system: String, user: String, context: Int, onDelta: @escaping @Sendable (String) -> Void) async throws -> String {
+        let promptTokens = TranscriptChunker.estimateTokens(system) + TranscriptChunker.estimateTokens(user)
+        let maxTokens = max(128, Int(Double(context) * contextSafety) - promptTokens)
+        var raw = ""
+        for try await delta in inference.stream(
+            InferenceRequest(system: system, user: user, temperature: temperature, maxTokens: maxTokens)) {
+            raw += delta
+            onDelta(delta)
+        }
+        return try OutputSanitizer.sanitizedNonEmpty(raw)
+    }
+
     /// Stitches the per-chunk refinements into one statement, de-duping ideas that span chunk
     /// boundaries. When the parts won't all fit one call, it merges them in groups and folds the
     /// group results together (a small map-reduce) so the seam de-dup is preserved instead of
