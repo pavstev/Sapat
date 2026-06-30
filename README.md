@@ -64,7 +64,12 @@ Pick inline (no Settings screen) — each is a small pipeline config:
 
 - **On-device transcription** — WhisperKit `large-v3` with VAD silence handling, tuned for long, pause-heavy monologues. (large-v3 is kept deliberately over the faster "turbo" model for Serbian accuracy.)
 - **Self-contained inference** — the reasoner runs **in-process via [MLX](https://github.com/ml-explore/mlx-swift)** on Apple Silicon. No other apps, no `lms` CLI, no localhost server. (LM Studio remains an optional opt-in backend.)
-- **Persistent semantic memory** — past transcripts and artifacts are indexed locally (SQLite + FTS5 keyword + on-device embeddings, fused with Reciprocal Rank Fusion). The pipeline recalls your related prior context so it answers with your accumulated knowledge.
+- **Live streaming + visible thinking** — output fills in token-by-token as the model generates, and a stage strip lights up Clean → Extract → Recall → Reason → Check → Write so you can watch the pipeline think.
+- **Rich, mode-aware output** — Engineering reports and Structured briefs render as Markdown (headings, bullets); the result shows "· N notes" when your semantic memory informed it. Polished English/Serbian stay clean plain text.
+- **Export & share** — Share any artifact or save it as Markdown straight from the result card.
+- **Inline glossary** — teach Šapat your terms (`k8s = Kubernetes`) in a collapsible editor — applied as terminology only, never as invented facts.
+- **Pin what matters** — pin History entries to keep them at the top.
+- **Persistent semantic memory** — past transcripts and artifacts are indexed locally (SQLite + FTS5 keyword + on-device embeddings via Accelerate-accelerated cosine, fused with Reciprocal Rank Fusion). The pipeline recalls your related prior context so it answers with your accumulated knowledge.
 - **Whole-recording guarantee** — long transcripts that exceed the model's context are split on sentence boundaries, refined piece by piece, then merged + de-duped, so the **beginning is never silently dropped**.
 - **Import any recording** — pick or drag in an audio **or video** file of any length; the audio track is extracted, silence skipped, transcribed + run through the pipeline like a live take.
 - **Models managed, not re-downloaded** — model weights live in `~/Library/Application Support/Sapat/Models`, *outside* the app bundle, so an in-place update never wipes them and a multi-GB model is fetched once and reused across every release.

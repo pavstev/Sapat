@@ -166,8 +166,15 @@ signing). Names, paths, and the repo slug derive from `Sources/Brand.swift`.
   4. **Hardening** — fail-closed ed25519 updater (+ CI signing); quit-while-busy guard.
   5. **Docs/tests/release** — this rewrite; XCTest coverage for the pipeline, sanitizer, memory,
      and the updater's fail-closed verification.
-- **Deferred backlog:** swap the reasoner to a larger local model via a setting; `sqlite-vec`
-  ANN for memory at scale (v2); `NLContextualEmbedding` for Serbian semantic search (v2);
-  notarization once a Developer ID exists.
+- **Shipped (v2.x polish):** token-by-token **streaming** (`Inference.stream`; MLX native, LM
+  Studio via the default wrapper) with a live `StageStrip`; **per-mode rendering** (`ArtifactView`
+  + `MarkdownText` — Markdown for report/brief, plain for Polished English/Serbian);
+  **export/share** (`ArtifactExport` + ShareLink/fileExporter); **inline glossary editor**;
+  **pinned** History entries; perf (Accelerate vDSP cosine + cached normalized embeddings);
+  accessibility (WCAG-AA contrast, VoiceOver labels, Reduce Motion); and the audit cleanups
+  (prompt-fragment dedup, `TranslationSource` enum, engine-agnostic renames).
+- **Deferred (designed, not built):** a hot-swap local **model picker** (engine-lifecycle risk),
+  an **"ask your memory"** Q&A path; plus `sqlite-vec` ANN for memory at scale,
+  `NLContextualEmbedding` for Serbian semantic search, and notarization once a Developer ID exists.
 - **Cut a release:** `git tag vX.Y.Z && git push origin vX.Y.Z` → CI builds, **signs**, and
   publishes the GitHub Release; the in-app updater and `scripts/install.sh` pick it up.
