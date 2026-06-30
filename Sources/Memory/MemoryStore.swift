@@ -24,6 +24,12 @@ actor MemoryStore {
 
     private let dbQueue: DatabaseQueue?
 
+    /// L2-normalized embeddings cached in-actor so vector search skips the per-query BLOB scan +
+    /// decode and collapses cosine to a single dot product. Built lazily on the first vector
+    /// search; kept coherent by `index`/`remove`. `nil` until first built (so the launch backfill
+    /// doesn't rebuild it per row).
+    private var normalizedCache: [(id: String, vector: [Float])]?
+
     /// `path` is injectable for tests; defaults to `Brand.memoryDatabaseURL()`.
     init(path: URL? = nil) {
         let url = path ?? (try? Brand.memoryDatabaseURL())
@@ -59,7 +65,8 @@ actor MemoryStore {
     func index(id: String, date: Date, serbian: String, artifact: String, intent: String, mode: String) {
         guard let dbQueue else { return }
         let embeddingSource = [intent, artifact, serbian].first { !$0.isEmpty } ?? ""
-        let embedding = Embedder.embed(embeddingSource).map { VectorMath.data($0) }
+        let floats = Embedder.embed(embeddingSource)
+        let embedding = floats.map { VectorMath.data($0) }
         let ftsText = [intent, artifact, serbian].filter { !$0.isEmpty }.joined(separator: " \n ")
         try? dbQueue.write { db in
             try db.execute(sql: """
@@ -72,6 +79,11 @@ actor MemoryStore {
             try db.execute(sql: "DELETE FROM memories_fts WHERE mem_id = ?", arguments: [id])
             try db.execute(sql: "INSERT INTO memories_fts (mem_id, text) VALUES (?, ?)", arguments: [id, ftsText])
         }
+        // Keep the normalized-embedding cache coherent (only once it has been built).
+        if normalizedCache != nil {
+            normalizedCache?.removeAll { $0.id == id }
+            if let floats { normalizedCache?.append((id, VectorMath.l2Normalized(floats))) }
+        }
     }
 
     func remove(id: String) {
@@ -79,6 +91,22 @@ actor MemoryStore {
             try db.execute(sql: "DELETE FROM memories WHERE id = ?", arguments: [id])
             try db.execute(sql: "DELETE FROM memories_fts WHERE mem_id = ?", arguments: [id])
         }
+        normalizedCache?.removeAll { $0.id == id }
+    }
+
+    /// Lazily-built, in-actor cache of L2-normalized embeddings for vector search.
+    private func normalizedEmbeddings() -> [(id: String, vector: [Float])] {
+        if let normalizedCache { return normalizedCache }
+        guard let dbQueue else { return [] }
+        let rows = (try? dbQueue.read { db in
+            try Row.fetchAll(db, sql: "SELECT id, embedding FROM memories WHERE embedding IS NOT NULL;")
+        }) ?? []
+        let built: [(id: String, vector: [Float])] = rows.compactMap { row in
+            guard let id: String = row["id"], let data: Data = row["embedding"] else { return nil }
+            return (id, VectorMath.l2Normalized(VectorMath.vector(data)))
+        }
+        normalizedCache = built
+        return built
     }
 
     /// One-time backfill: index any records not already present (keeps JSON as the source of
@@ -113,17 +141,14 @@ actor MemoryStore {
             }) ?? []
         }
 
-        // 2. Vector ranking via cosine over stored embeddings (brute force).
+        // 2. Vector ranking over the cached, L2-normalized embeddings — cosine collapses to a
+        //    single dot product per row (no per-query BLOB scan + decode).
         var vectorIDs: [String] = []
         if let queryEmbedding = Embedder.embed(trimmed) {
-            let rows = (try? dbQueue.read { db in
-                try Row.fetchAll(db, sql: "SELECT id, embedding FROM memories WHERE embedding IS NOT NULL;")
-            }) ?? []
-            let scored: [(String, Float)] = rows.compactMap { row in
-                guard let id: String = row["id"], let data: Data = row["embedding"] else { return nil }
-                let vector = VectorMath.vector(data)
-                guard vector.count == queryEmbedding.count else { return nil }
-                return (id, VectorMath.cosine(queryEmbedding, vector))
+            let query = VectorMath.l2Normalized(queryEmbedding)
+            let scored: [(String, Float)] = normalizedEmbeddings().compactMap { entry in
+                guard entry.vector.count == query.count else { return nil }
+                return (entry.id, VectorMath.dot(query, entry.vector))
             }
             vectorIDs = scored.sorted { $0.1 > $1.1 }.prefix(20).map(\.0)
         }

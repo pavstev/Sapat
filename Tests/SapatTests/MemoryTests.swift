@@ -29,6 +29,21 @@ final class VectorMathTests: XCTestCase {
         XCTAssertEqual(MemoryStore.ftsMatch(from: "retry queue!"), "\"retry\" OR \"queue\"")
         XCTAssertNil(MemoryStore.ftsMatch(from: "a or b"))  // all tokens < 3 chars
     }
+
+    func testVDSPCosineMatchesScalarAndNormalizedDot() {
+        let a = (0..<512).map { Float(sin(Double($0) * 0.1)) }
+        let b = (0..<512).map { Float(cos(Double($0) * 0.07)) }
+        func scalarCosine(_ x: [Float], _ y: [Float]) -> Float {
+            var d: Float = 0, nx: Float = 0, ny: Float = 0
+            for i in 0..<x.count { d += x[i] * y[i]; nx += x[i] * x[i]; ny += y[i] * y[i] }
+            let den = nx.squareRoot() * ny.squareRoot()
+            return den == 0 ? 0 : d / den
+        }
+        XCTAssertEqual(VectorMath.cosine(a, b), scalarCosine(a, b), accuracy: 1e-4)
+        // cosine on L2-normalized vectors collapses to a dot product (the cached-search path).
+        let dot = VectorMath.dot(VectorMath.l2Normalized(a), VectorMath.l2Normalized(b))
+        XCTAssertEqual(dot, VectorMath.cosine(a, b), accuracy: 1e-4)
+    }
 }
 
 /// The GRDB-backed semantic memory store: indexing, keyword retrieval, removal, idempotent
@@ -70,6 +85,20 @@ final class MemoryStoreTests: XCTestCase {
         XCTAssertEqual(count, 0)
         let hits = await store.search(query: "caching", limit: 3)
         XCTAssertTrue(hits.isEmpty)
+    }
+
+    func testSearchReflectsIndexAndRemoveAfterCacheBuilt() async {
+        let store = makeStore()
+        await store.index(id: "1", date: Date(timeIntervalSince1970: 1), serbian: "",
+                          artifact: "distributed tracing across microservices", intent: "", mode: "m")
+        _ = await store.search(query: "distributed tracing", limit: 3) // builds the embedding cache
+        await store.index(id: "2", date: Date(timeIntervalSince1970: 2), serbian: "",
+                          artifact: "kubernetes pod autoscaling policy", intent: "", mode: "m")
+        let added = await store.search(query: "kubernetes autoscaling", limit: 3)
+        XCTAssertEqual(added.first?.id, "2", "a row indexed after the cache was built is searchable")
+        await store.remove(id: "2")
+        let removed = await store.search(query: "kubernetes autoscaling", limit: 3)
+        XCTAssertFalse(removed.contains { $0.id == "2" }, "a removed row drops out of results")
     }
 
     func testBackfillIsIdempotent() async {

@@ -1,3 +1,4 @@
+import Accelerate
 import Foundation
 import NaturalLanguage
 
@@ -24,16 +25,37 @@ enum Embedder {
 /// blob (de)serialization for storing embeddings in SQLite, and Reciprocal Rank Fusion for
 /// combining the keyword and vector rankings into one hybrid result.
 enum VectorMath {
+    /// Cosine similarity, via Accelerate (vDSP) — dot / (‖a‖·‖b‖).
     static func cosine(_ a: [Float], _ b: [Float]) -> Float {
         guard a.count == b.count, !a.isEmpty else { return 0 }
-        var dot: Float = 0, na: Float = 0, nb: Float = 0
-        for i in 0..<a.count {
-            dot += a[i] * b[i]
-            na += a[i] * a[i]
-            nb += b[i] * b[i]
-        }
-        let denom = na.squareRoot() * nb.squareRoot()
-        return denom == 0 ? 0 : dot / denom
+        let n = vDSP_Length(a.count)
+        var dotValue: Float = 0, sumSqA: Float = 0, sumSqB: Float = 0
+        vDSP_dotpr(a, 1, b, 1, &dotValue, n)
+        vDSP_svesq(a, 1, &sumSqA, n)
+        vDSP_svesq(b, 1, &sumSqB, n)
+        let denom = sumSqA.squareRoot() * sumSqB.squareRoot()
+        return denom == 0 ? 0 : dotValue / denom
+    }
+
+    /// L2-normalized copy (‖v‖ == 1), so a later cosine collapses to a single dot product.
+    static func l2Normalized(_ v: [Float]) -> [Float] {
+        guard !v.isEmpty else { return v }
+        let n = vDSP_Length(v.count)
+        var sumSq: Float = 0
+        vDSP_svesq(v, 1, &sumSq, n)
+        var norm = sumSq.squareRoot()
+        guard norm > 0 else { return v }
+        var out = [Float](repeating: 0, count: v.count)
+        vDSP_vsdiv(v, 1, &norm, &out, 1, n)
+        return out
+    }
+
+    /// Plain dot product — cosine for already-L2-normalized vectors (the cached-search hot path).
+    static func dot(_ a: [Float], _ b: [Float]) -> Float {
+        guard a.count == b.count, !a.isEmpty else { return 0 }
+        var value: Float = 0
+        vDSP_dotpr(a, 1, b, 1, &value, vDSP_Length(a.count))
+        return value
     }
 
     static func data(_ vector: [Float]) -> Data {
